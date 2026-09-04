@@ -1,0 +1,65 @@
+# ---- secrets / local config
+deploy/.env
+deploy/.env.*
+!deploy/.env.example
+*.pem
+*.key
+
+# ---- node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+npm-debug.log*
+yarn-error.log*
+
+# ---- python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+htmlcov/
+.coverage
+
+# ---- media inputs (regenerate with `make synthetic`; own/fallback videos are never committed)
+media/synthetic/*
+!media/synthetic/.gitkeep
+!media/synthetic/plates.json
+media/own/*
+!media/own/.gitkeep
+media/fallback/*
+!media/fallback/.gitkeep
+*.mp4
+*.mkv
+*.mov
+!docs/**/*.mp4
+
+# ---- runtime outputs
+data/
+recordings/
+backups/
+anpr/weights/*.onnx
+anpr/weights/*.pt
+anpr/weights/*.tar
+anpr/weights/paddle/
+docs/screenshots/**/*.png
+docs/screenshots/**/*.json
+!docs/screenshots/.gitkeep
+
+# ---- OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# scripted acceptance-check outputs (scripts/integration_checks.mjs)
+scripts/out/

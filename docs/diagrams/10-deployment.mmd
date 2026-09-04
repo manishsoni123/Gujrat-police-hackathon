@@ -1,0 +1,24 @@
+%% Sentinel Gujarat – Phase 1 deployment view (contract §1.1, §1.2)
+flowchart TB
+  JURY["Jury browser<br/>Chrome / Edge, 4G or office network"] -- "443 HTTPS / WSS" --> CADDY
+  JURY -- "8189 UDP+TCP (WebRTC ICE)" --> MTX
+  subgraph VM["Ubuntu 22.04 VM · Docker Compose project 'sentinel'"]
+    CADDY["web (caddy:2)<br/>SPA from /srv · auto-TLS<br/>/api /ws /media → api · /mtx /playback → mediamtx"]
+    API["api (python:3.11-slim + ffmpeg)<br/>FastAPI · uvicorn · APScheduler"]
+    MTX["mediamtx (bluenviron/mediamtx:latest-ffmpeg)<br/>8554 RTSP · 8889 WHEP · 8888 HLS · 9996 playback · 9997 API"]
+    PG[("postgres (postgis/postgis:16-3.4)<br/>volume pgdata")]
+    LIVE["anpr-live / anpr-live-gpu<br/>profile cpu | gpu"]
+    PRE["anpr-preindex / anpr-preindex-gpu"]
+    VOL[("volumes: sentinel_data (/data)<br/>recordings · caddy_data · ./media (ro)")]
+  end
+  CADDY --> API
+  CADDY --> MTX
+  API --> PG
+  API --> VOL
+  MTX --> VOL
+  LIVE -- "RTSP" --> MTX
+  PRE -- "RTSP" --> MTX
+  LIVE -- "X-API-Key internal" --> API
+  PRE -- "X-API-Key internal" --> API
+  SBX["Organiser sandbox<br/>(RTSP :8554, catalogue /api/ingest)"] -- "RTSP/TCP" --> MTX
+  API -- "GET /api/ingest" --> SBX

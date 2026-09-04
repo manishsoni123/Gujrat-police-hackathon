@@ -1,0 +1,213 @@
+# Sentinel Gujarat - MediaMTX relay configuration (CONTRACT §8).
+#
+# Pinned image: bluenviron/mediamtx:1.20.1-ffmpeg = MediaMTX v1.20.1
+#   digest sha256:16c56911dbd1fd7a85455042fa8320779fc8bf6575c6903f74023b202c1a620c
+# Key names below were checked against the /mediamtx.yml reference shipped in
+# that image. Two names differ from CONTRACT §8.2 and are recorded in the
+# Amendments table: `hlsAllowOrigin` -> `hlsAllowOrigins` (list) and
+# `webrtcAllowOrigin` -> `webrtcAllowOrigins` (list).
+#
+# Any key can be overridden at runtime with an environment variable
+# MTX_<UPPERCASEKEY>, e.g. MTX_WEBRTCADDITIONALHOSTS=203.0.113.10 (set by
+# docker-compose.yml from deploy/.env). Runtime-added paths (POST
+# /v3/config/paths/add/...) are NOT persisted; the API re-adds them on
+# startup and whenever the health poller finds one missing.
+
+###############################################
+# Global settings -> General
+
+logLevel: info
+logDestinations: [stdout]
+readTimeout: 20s
+writeTimeout: 20s
+writeQueueSize: 1024
+udpMaxPayloadSize: 1472
+
+###############################################
+# Global settings -> Authentication
+#
+# Every port except 8189 (ICE) is reachable only inside the compose network
+# or through Caddy, which guards /mtx/* and /playback/* with forward_auth to
+# the API (CONTRACT §2.5). MediaMTX itself therefore allows everything.
+
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+
+###############################################
+# Global settings -> Control API (used by the API service: path add/patch/delete, paths/list)
+
+api: yes
+apiAddress: :9997
+apiAllowOrigins: ['*']
+
+metrics: no
+pprof: no
+
+###############################################
+# Global settings -> Playback server (recorded viewing, V4)
+
+playback: yes
+playbackAddress: :9996
+playbackAllowOrigins: ['*']
+
+###############################################
+# Global settings -> RTSP server
+#
+# Server side transport list. Only TCP is offered, which is the sandbox rule
+# (UDP fails across NAT) and what the ANPR worker and ffmpeg publishers use.
+
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+rtspEncryption: "no"
+rtspAuthMethods: [basic]
+
+###############################################
+# Global settings -> RTMP / SRT / MoQ (not used)
+
+rtmp: no
+srt: no
+moq: no
+
+###############################################
+# Global settings -> HLS server (browser fallback after WHEP)
+#
+# mpegts variant + 1 s segments + a low segment count keep the fallback
+# latency small. hlsAlwaysRemux is OFF (amendment to CONTRACT §8.2, which
+# said `yes`): with it on, MediaMTX spawns an HLS muxer on every ready path
+# including the raw H.265 ones (stream/8, cam_<id> of every H.265 camera),
+# and the MPEG-TS muxer cannot carry H.265, so it crash-looped every 10 s
+# ("muxer instance crashed: the MPEG-TS variant of HLS supports H264 video
+# only") and flooded the relay log. Muxers now start on the first request;
+# the API pre-warms the browser paths after an import (trigger_hls) and
+# WebRTC is the primary player, so the fallback still starts in 2-3 s.
+
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigins: ['*']
+hlsAlwaysRemux: no
+hlsVariant: mpegts
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 50M
+hlsMuxerCloseAfter: 60s
+
+###############################################
+# Global settings -> WebRTC server (WHEP, primary browser path)
+#
+# Single ICE port (8189) for UDP and TCP so only one port pair has to be
+# opened on the VM. webrtcAdditionalHosts must carry the public IP of the
+# VM (env MTX_WEBRTCADDITIONALHOSTS); 127.0.0.1 works on the laptop because
+# Docker Desktop publishes 8189 on localhost.
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcIPsFromInterfaces: yes
+webrtcIPsFromInterfacesList: []
+webrtcAdditionalHosts: [127.0.0.1]
+webrtcICEServers2: []
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
+
+###############################################
+# Default path settings
+#
+# Every camera relay path (cam_<id>) is created at run time by the API with
+# the JSON in CONTRACT §8.3; the values there mirror these defaults.
+# Recording is off by default and enabled per path (anpr_enabled cameras,
+# own feeds) by the API.
+#
+# NOTE (amendment to CONTRACT §8.2): `sourceOnDemand: yes` must NOT be set
+# here. MediaMTX v1.20.1 treats it as a fatal configuration error when the
+# default source is `publisher` ("'sourceOnDemand' is useless when source is
+# 'publisher'"). The API sets sourceOnDemand=true explicitly on every
+# cam_<id> path it creates (§8.3 JSON), so the behaviour is unchanged.
+
+pathDefaults:
+  source: publisher
+  sourceOnDemandStartTimeout: 15s
+  sourceOnDemandCloseAfter: 60s
+  maxReaders: 0
+  rtspTransport: tcp
+  record: no
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 1m
+  recordDeleteAfter: 12h
+  runOnInitRestart: no
+  runOnDemandRestart: no
+  runOnDemandStartTimeout: 20s
+  runOnDemandCloseAfter: 60s
+
+###############################################
+# Static paths
+#
+# stream/1..8 mimic the organiser sandbox (rtsp://<host>:8554/stream/<id>)
+# using the synthetic loops generated by scripts/make_synthetic_videos.py.
+# The sh wrapper waits until the file exists (the `synth` container may run
+# after MediaMTX starts) instead of crash-looping ffmpeg every 5 s. File names
+# are written out literally on purpose: MediaMTX expands $VAR references in
+# runOn* commands itself (they become empty), so shell variables cannot be used.
+# `-rtsp_transport tcp` on the publisher side is required because the RTSP
+# server only offers TCP.
+
+paths:
+  stream/1:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_1.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_1.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/1'
+    runOnInitRestart: yes
+  stream/2:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_2.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_2.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/2'
+    runOnInitRestart: yes
+  stream/3:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_3.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_3.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/3'
+    runOnInitRestart: yes
+  stream/4:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_4.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_4.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/4'
+    runOnInitRestart: yes
+  stream/5:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_5.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_5.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/5'
+    runOnInitRestart: yes
+  stream/6:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_6.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_6.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/6'
+    runOnInitRestart: yes
+  stream/7:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_7.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_7.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/7'
+    runOnInitRestart: yes
+  # Camera 8 is encoded H.265 by the generator; it is relayed as-is and the
+  # API creates cam_<id>_h264 (libx264 / NVENC transcode) for browsers.
+  stream/8:
+    runOnInit: sh -c 'until [ -f /media/synthetic/cam_8.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_8.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/stream/8'
+    runOnInitRestart: yes
+
+  # Our own "private society camera" (V3 / Video 1). Uses the team's phone
+  # video when present, otherwise falls back to synthetic camera 1 so the
+  # path is always demoable. Registered manually as external_id OWN-GATE-01,
+  # rtsp_url rtsp://mediamtx:8554/own_gate. Recorded like an ANPR camera.
+  own_gate:
+    runOnInit: sh -c 'until [ -f /media/own/own_gate.mp4 ] || [ -f /media/synthetic/cam_1.mp4 ]; do sleep 10; done; if [ -f /media/own/own_gate.mp4 ]; then exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/own/own_gate.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/own_gate; else exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_1.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/own_gate; fi'
+    runOnInitRestart: yes
+    record: yes
+
+  # Optional recorded clips of chosen sandbox cameras (S4). Drop
+  # media/fallback/<id>.mp4 files and copy this block per id, e.g.
+  # fallback_3:
+  #   runOnInit: sh -c 'until [ -f /media/fallback/3.mp4 ]; do sleep 10; done; exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/fallback/3.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/fallback_3'
+  #   runOnInitRestart: yes
+
+  # Everything else: API-added cam_<id> / cam_<id>_h264 paths carry their own
+  # full configuration; this catch-all only lets ad-hoc publishers (a phone
+  # RTSP app pushing to own_<slug>, a test ffmpeg) use any other path name.
+  all_others:

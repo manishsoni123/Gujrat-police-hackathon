@@ -1,0 +1,56 @@
+%% Sentinel Gujarat – CameraSourceAdapter and ExternalLookupAdapter framework (HLD §4, §15)
+classDiagram
+  class CameraSourceAdapter {
+    <<interface>>
+    +list_cameras() list~CameraImportRow~
+    +stream_url(camera) str
+    +probe(camera) ProbeResult
+  }
+  class RtspAdapter {
+    +list_cameras() : the camera itself
+    +stream_url() : cameras.rtsp_url
+    +probe() : ffprobe -rtsp_transport tcp
+  }
+  class SandboxCatalogueAdapter {
+    -base_url, auth, field_map, timeout
+    +list_cameras() : GET /api/ingest → field map → rows
+    +stream_url() : catalogue rtsp_url
+    +probe() : ffprobe via relay
+  }
+  class OnvifAdapter {
+    <<P2>>
+    +list_cameras() : WS-Discovery on LAN
+    +stream_url() : GetProfiles + GetStreamUri
+    +probe() : GetDeviceInformation
+  }
+  class VendorSdkAdapter {
+    <<roadmap>>
+    Hikvision ISAPI · Dahua · Axis VAPIX
+    Milestone XProtect · Genetec · NX Witness
+  }
+  CameraSourceAdapter <|.. RtspAdapter
+  CameraSourceAdapter <|.. SandboxCatalogueAdapter
+  CameraSourceAdapter <|.. OnvifAdapter
+  CameraSourceAdapter <|.. VendorSdkAdapter
+
+  class ExternalLookupAdapter {
+    <<interface>>
+    +lookup(key) dict
+  }
+  class VahanMock {
+    +lookup(plate) : deterministic owner record
+  }
+  class SarthiMock {
+    +lookup(dl_number) : deterministic licence record
+  }
+  class EGujCopImport {
+    <<mapping documented>>
+    CSV / API → watchlist rows
+  }
+  class AfisNafis {
+    <<roadmap, FRS era>>
+  }
+  ExternalLookupAdapter <|.. VahanMock
+  ExternalLookupAdapter <|.. SarthiMock
+  ExternalLookupAdapter <|.. EGujCopImport
+  ExternalLookupAdapter <|.. AfisNafis

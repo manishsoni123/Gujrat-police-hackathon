@@ -1,0 +1,875 @@
+{
+  "generated_at": "2026-09-04T20:27:51Z",
+  "seed": 42,
+  "width": 1280,
+  "height": 720,
+  "fps": 10,
+  "loop_seconds": 90,
+  "cameras": [
+    {
+      "id": 1,
+      "file": "cam_1.mp4",
+      "codec": "H264",
+      "label": "Sachivalaya Gate 1"
+    },
+    {
+      "id": 2,
+      "file": "cam_2.mp4",
+      "codec": "H264",
+      "label": "Sector 11 GSRTC Bus Stand"
+    },
+    {
+      "id": 3,
+      "file": "cam_3.mp4",
+      "codec": "H264",
+      "label": "Civil Hospital Gandhinagar OPD Gate"
+    },
+    {
+      "id": 4,
+      "file": "cam_4.mp4",
+      "codec": "H264",
+      "label": "Infocity Circle"
+    },
+    {
+      "id": 5,
+      "file": "cam_5.mp4",
+      "codec": "H264",
+      "label": "Pethapur Gram Panchayat Chowk"
+    },
+    {
+      "id": 6,
+      "file": "cam_6.mp4",
+      "codec": "H264",
+      "label": "CH-0 Circle"
+    },
+    {
+      "id": 7,
+      "file": "cam_7.mp4",
+      "codec": "H264",
+      "label": "Mahatma Mandir Approach"
+    },
+    {
+      "id": 8,
+      "file": "cam_8.mp4",
+      "codec": "H265",
+      "label": "Koba Circle Highway"
+    }
+  ],
+  "plates": [
+    {
+      "plate": "22BH4321AA",
+      "display": "22 BH 4321 AA",
+      "two_line": true,
+      "anchor": true,
+      "cameras": [
+        5,
+        2,
+        8
+      ]
+    },
+    {
+      "plate": "GJ01AB1234",
+      "display": "GJ 01 AB 1234",
+      "two_line": false,
+      "anchor": true,
+      "cameras": [
+        1,
+        3,
+        6,
+        2
+      ]
+    },
+    {
+      "plate": "GJ05RS9012",
+      "display": "GJ 05 RS 9012",
+      "two_line": false,
+      "anchor": true,
+      "cameras": [
+        2,
+        5,
+        1
+      ]
+    },
+    {
+      "plate": "GJ18CD5678",
+      "display": "GJ 18 CD 5678",
+      "two_line": false,
+      "anchor": true,
+      "cameras": [
+        4,
+        7,
+        8
+      ]
+    },
+    {
+      "plate": "GJ27XY3456",
+      "display": "GJ 27 XY 3456",
+      "two_line": false,
+      "anchor": true,
+      "cameras": [
+        6,
+        3,
+        7,
+        4
+      ]
+    },
+    {
+      "plate": "MH02BZ7788",
+      "display": "MH 02 BZ 7788",
+      "two_line": true,
+      "anchor": true,
+      "cameras": [
+        8,
+        6
+      ]
+    },
+    {
+      "plate": "GJ01Z6925",
+      "display": "GJ 01 Z 6925",
+      "two_line": true,
+      "anchor": false,
+      "cameras": [
+        4,
+        6,
+        5,
+        2
+      ]
+    },
+    {
+      "plate": "GJ03HK1308",
+      "display": "GJ 03 HK 1308",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        3,
+        8,
+        5
+      ]
+    },
+    {
+      "plate": "GJ05XF8752",
+      "display": "GJ 05 XF 8752",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        4,
+        7,
+        8,
+        6,
+        1
+      ]
+    },
+    {
+      "plate": "GJ07N1585",
+      "display": "GJ 07 N 1585",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        7,
+        5,
+        4,
+        8,
+        3,
+        6
+      ]
+    },
+    {
+      "plate": "GJ15N4555",
+      "display": "GJ 15 N 4555",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        8,
+        5,
+        4
+      ]
+    },
+    {
+      "plate": "GJ16R6217",
+      "display": "GJ 16 R 6217",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        1,
+        4,
+        7
+      ]
+    },
+    {
+      "plate": "GJ18ZU3599",
+      "display": "GJ 18 ZU 3599",
+      "two_line": true,
+      "anchor": false,
+      "cameras": [
+        4
+      ]
+    },
+    {
+      "plate": "GJ21H0526",
+      "display": "GJ 21 H 0526",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        2
+      ]
+    },
+    {
+      "plate": "GJ21JC3457",
+      "display": "GJ 21 JC 3457",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        8
+      ]
+    },
+    {
+      "plate": "GJ22EG5515",
+      "display": "GJ 22 EG 5515",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        8,
+        1,
+        7,
+        6
+      ]
+    },
+    {
+      "plate": "GJ23WJ0712",
+      "display": "GJ 23 WJ 0712",
+      "two_line": true,
+      "anchor": false,
+      "cameras": [
+        2,
+        3,
+        4,
+        5,
+        7
+      ]
+    },
+    {
+      "plate": "GJ23Y4375",
+      "display": "GJ 23 Y 4375",
+      "two_line": true,
+      "anchor": false,
+      "cameras": [
+        4,
+        3
+      ]
+    },
+    {
+      "plate": "GJ26RE4340",
+      "display": "GJ 26 RE 4340",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        1
+      ]
+    },
+    {
+      "plate": "GJ30DN1292",
+      "display": "GJ 30 DN 1292",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        5,
+        7
+      ]
+    },
+    {
+      "plate": "GJ30MF6066",
+      "display": "GJ 30 MF 6066",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        2,
+        6,
+        3
+      ]
+    },
+    {
+      "plate": "GJ36XW5926",
+      "display": "GJ 36 XW 5926",
+      "two_line": false,
+      "anchor": false,
+      "cameras": [
+        1,
+        3
+      ]
+    },
+    {
+      "plate": "GJ37LG8180",
+      "display": "GJ 37 LG 8180",
+      "two_line": true,
+      "anchor": false,
+      "cameras": [
+        8
+      ]
+    },
+    {
+      "plate": "GJ37Z1140",
+      "display": "GJ 37 Z 1140",
+      "two_line": true,
+      "anchor": false,
+      "cameras": [
+        4,
+        1,
+        2
+      ]
+    }
+  ],
+  "appearances": [
+    {
+      "camera_id": 1,
+      "plate": "GJ01AB1234",
+      "start_s": 5.0,
+      "end_s": 9.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 1,
+      "plate": "GJ26RE4340",
+      "start_s": 13.0,
+      "end_s": 17.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 1,
+      "plate": "GJ22EG5515",
+      "start_s": 25.0,
+      "end_s": 29.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 1,
+      "plate": "GJ37Z1140",
+      "start_s": 37.0,
+      "end_s": 41.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 1,
+      "plate": "GJ16R6217",
+      "start_s": 55.0,
+      "end_s": 59.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 1,
+      "plate": "GJ05RS9012",
+      "start_s": 65.0,
+      "end_s": 69.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 1,
+      "plate": "GJ36XW5926",
+      "start_s": 73.0,
+      "end_s": 77.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 1,
+      "plate": "GJ05XF8752",
+      "start_s": 79.0,
+      "end_s": 83.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 2,
+      "plate": "GJ30MF6066",
+      "start_s": 1.0,
+      "end_s": 5.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 2,
+      "plate": "GJ05RS9012",
+      "start_s": 15.0,
+      "end_s": 19.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 2,
+      "plate": "GJ23WJ0712",
+      "start_s": 25.0,
+      "end_s": 29.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 2,
+      "plate": "GJ01Z6925",
+      "start_s": 31.0,
+      "end_s": 35.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 2,
+      "plate": "GJ21H0526",
+      "start_s": 43.0,
+      "end_s": 47.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 2,
+      "plate": "22BH4321AA",
+      "start_s": 48.0,
+      "end_s": 52.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 2,
+      "plate": "GJ37Z1140",
+      "start_s": 55.0,
+      "end_s": 59.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 2,
+      "plate": "GJ01AB1234",
+      "start_s": 72.0,
+      "end_s": 76.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ01AB1234",
+      "start_s": 25.0,
+      "end_s": 29.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ27XY3456",
+      "start_s": 30.0,
+      "end_s": 34.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ30MF6066",
+      "start_s": 43.0,
+      "end_s": 47.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ23WJ0712",
+      "start_s": 49.0,
+      "end_s": 53.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ03HK1308",
+      "start_s": 55.0,
+      "end_s": 59.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ07N1585",
+      "start_s": 61.0,
+      "end_s": 65.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ23Y4375",
+      "start_s": 67.0,
+      "end_s": 71.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 3,
+      "plate": "GJ36XW5926",
+      "start_s": 85.0,
+      "end_s": 89.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ18CD5678",
+      "start_s": 10.0,
+      "end_s": 14.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ37Z1140",
+      "start_s": 19.0,
+      "end_s": 23.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ05XF8752",
+      "start_s": 25.0,
+      "end_s": 29.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ18ZU3599",
+      "start_s": 31.0,
+      "end_s": 35.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ15N4555",
+      "start_s": 37.0,
+      "end_s": 41.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ23Y4375",
+      "start_s": 55.0,
+      "end_s": 59.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ01Z6925",
+      "start_s": 61.0,
+      "end_s": 65.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ07N1585",
+      "start_s": 67.0,
+      "end_s": 71.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ23WJ0712",
+      "start_s": 73.0,
+      "end_s": 77.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ27XY3456",
+      "start_s": 80.0,
+      "end_s": 84.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 4,
+      "plate": "GJ16R6217",
+      "start_s": 85.0,
+      "end_s": 89.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 5,
+      "plate": "22BH4321AA",
+      "start_s": 12.0,
+      "end_s": 16.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 5,
+      "plate": "GJ15N4555",
+      "start_s": 25.0,
+      "end_s": 29.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 5,
+      "plate": "GJ05RS9012",
+      "start_s": 40.0,
+      "end_s": 44.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 5,
+      "plate": "GJ07N1585",
+      "start_s": 49.0,
+      "end_s": 53.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 5,
+      "plate": "GJ23WJ0712",
+      "start_s": 61.0,
+      "end_s": 65.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 5,
+      "plate": "GJ30DN1292",
+      "start_s": 73.0,
+      "end_s": 77.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 5,
+      "plate": "GJ03HK1308",
+      "start_s": 79.0,
+      "end_s": 83.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 5,
+      "plate": "GJ01Z6925",
+      "start_s": 85.0,
+      "end_s": 89.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 6,
+      "plate": "GJ07N1585",
+      "start_s": 1.0,
+      "end_s": 5.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 6,
+      "plate": "GJ27XY3456",
+      "start_s": 8.0,
+      "end_s": 12.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 6,
+      "plate": "GJ30MF6066",
+      "start_s": 13.0,
+      "end_s": 17.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 6,
+      "plate": "MH02BZ7788",
+      "start_s": 45.0,
+      "end_s": 49.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 6,
+      "plate": "GJ01AB1234",
+      "start_s": 50.0,
+      "end_s": 54.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 6,
+      "plate": "GJ22EG5515",
+      "start_s": 61.0,
+      "end_s": 65.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 6,
+      "plate": "GJ01Z6925",
+      "start_s": 73.0,
+      "end_s": 77.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 6,
+      "plate": "GJ05XF8752",
+      "start_s": 85.0,
+      "end_s": 89.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ16R6217",
+      "start_s": 13.0,
+      "end_s": 17.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ07N1585",
+      "start_s": 25.0,
+      "end_s": 29.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ18CD5678",
+      "start_s": 35.0,
+      "end_s": 39.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ22EG5515",
+      "start_s": 49.0,
+      "end_s": 53.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ27XY3456",
+      "start_s": 55.0,
+      "end_s": 59.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ05XF8752",
+      "start_s": 61.0,
+      "end_s": 65.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ23WJ0712",
+      "start_s": 73.0,
+      "end_s": 77.0,
+      "two_line": true,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 7,
+      "plate": "GJ30DN1292",
+      "start_s": 85.0,
+      "end_s": 89.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ22EG5515",
+      "start_s": 7.0,
+      "end_s": 11.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ15N4555",
+      "start_s": 13.0,
+      "end_s": 17.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 8,
+      "plate": "MH02BZ7788",
+      "start_s": 20.0,
+      "end_s": 24.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ37LG8180",
+      "start_s": 25.0,
+      "end_s": 29.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ21JC3457",
+      "start_s": 37.0,
+      "end_s": 41.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ18CD5678",
+      "start_s": 60.0,
+      "end_s": 64.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ03HK1308",
+      "start_s": 67.0,
+      "end_s": 71.0,
+      "two_line": false,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ05XF8752",
+      "start_s": 73.0,
+      "end_s": 77.0,
+      "two_line": false,
+      "direction": "ltr"
+    },
+    {
+      "camera_id": 8,
+      "plate": "22BH4321AA",
+      "start_s": 78.0,
+      "end_s": 82.0,
+      "two_line": true,
+      "direction": "rtl"
+    },
+    {
+      "camera_id": 8,
+      "plate": "GJ07N1585",
+      "start_s": 85.0,
+      "end_s": 89.0,
+      "two_line": false,
+      "direction": "rtl"
+    }
+  ]
+}

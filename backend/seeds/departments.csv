@@ -1,0 +1,28 @@
+code,name,aliases
+UNASSIGNED,Unassigned,unassigned|unknown|other
+POLICE,Gujarat Police,police|gujarat police|home|home department
+HEALTH,Health & Family Welfare,health|health & family welfare|health and family welfare|hospital|civil hospital
+GSRTC,Gujarat State Road Transport Corporation,gsrtc|transport corporation|st depot|bus stand
+PANCHAYAT,Panchayat & Rural Development,panchayat|gram panchayat|rural development|taluka panchayat
+MUNICIPAL,Urban Development & Municipal Corporations,municipal corporation|municipal|amc|smc|vmc|rmc|urban development|smart city|nagarpalika
+RTO,Transport (RTO),rto|transport|motor vehicles
+FCS,Food & Civil Supplies,food & civil supplies|food and civil supplies|fcs|pds
+EDU,Education,education|school|college
+FOREST,Forests & Environment,forest|forests|environment|wildlife
+RNB,Roads & Buildings,roads & buildings|r&b|pwd
+GIDC,Industries (GIDC),gidc|industries|industrial estate
+GMB,Ports (Gujarat Maritime Board),gmb|ports|maritime
+WATER,Water Resources & Narmada,water|narmada|irrigation|water supply
+ENERGY,Energy & Petrochemicals,energy|getco|guvnl|electricity
+TOURISM,Tourism,tourism|tourist
+REVENUE,Revenue,revenue|collectorate|mamlatdar
+PRISONS,Prisons,prison|jail|prisons
+FIRE,Fire & Emergency Services,fire|fire brigade|emergency services
+GMRC,Metro Rail (GMRC),metro|gmrc
+SPORTS,Sports Youth & Cultural Activities,sports|stadium|cultural
+AGRI,Agriculture & Farmers Welfare,agriculture|apmc|mandi
+WCD,Women & Child Development,women & child|wcd|anganwadi
+SJE,Social Justice & Empowerment,social justice|sje|hostel
+LABOUR,Labour & Employment,labour|employment|iti
+DST,Science & Technology,science & technology|dst|data centre
+FINANCE,Finance (Treasury),finance|treasury

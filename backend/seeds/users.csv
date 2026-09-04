@@ -1,0 +1,5 @@
+username,full_name,role,department_code,district,password_env
+jury_admin,Jury Administrator,admin,,,JURY_ADMIN_PASSWORD
+jury_operator,Jury Operator,operator,,,JURY_OPERATOR_PASSWORD
+jury_viewer,Jury Viewer,viewer,,,JURY_VIEWER_PASSWORD
+dept_admin_police,Police Department Admin,dept_admin,POLICE,,DEPT_ADMIN_PASSWORD

@@ -1,0 +1,42 @@
+%% Sentinel Gujarat – target topology for ~80,000 cameras (Plan for Scale §2)
+flowchart TB
+  subgraph EDGE["Edge / district tier (33 districts, ~2,400 cameras each on average)"]
+    direction LR
+    CAMS["Departmental cameras / NVR / VMS<br/>RTSP · ONVIF · SDK adapters<br/>analog via encoder or DVR RTSP"]
+    RELAY["Regional relay cluster (MediaMTX × n)<br/>one TCP pull per camera · WHEP/HLS to local viewers<br/>optional regional recording (Model 4 variant)"]
+    EDGEGPU["Edge ANPR appliances (2 × L4 each)<br/>~64 cameras at 5 fps or ~144 at keyframe rate<br/>store-and-forward queue when uplink drops"]
+    CAMS -- "video stays in the district" --> RELAY
+    RELAY --> EDGEGPU
+  end
+
+  subgraph CORE["State data centre – Kubernetes (Gandhinagar) + DR region"]
+    direction LR
+    LB["Load balancer / WAF / mTLS"]
+    KAFKA["Kafka (event bus)<br/>reads · sightings · counts · health"]
+    APIP["API pods (stateless FastAPI × N)<br/>matcher pods · WS gateway pods"]
+    PGC[("PostgreSQL + Citus/Timescale<br/>day-partitioned reads & sightings<br/>PostGIS registry")]
+    OBJ[("Object storage (Ceph/MinIO, S3 API)<br/>crops · frames · clips · reports<br/>WORM bucket for evidence")]
+    OBS["Prometheus · Grafana · Loki · Alertmanager"]
+    IDP["Keycloak (SSO/MFA) · Vault · SIEM"]
+    LB --> APIP --> PGC
+    APIP --> OBJ
+    KAFKA --> APIP
+    APIP -.-> OBS
+    APIP -.-> IDP
+  end
+
+  subgraph EXT["Government systems (integration-ready adapters)"]
+    VAHAN["VAHAN"]
+    SARTHI["SARTHI"]
+    EGUJ["eGujCop"]
+    AFIS["AFIS / NAFIS"]
+  end
+
+  EDGEGPU -- "metadata + best crop only (~2 KB/s per camera)" --> KAFKA
+  RELAY -- "health, snapshots" --> LB
+  APIP -- "adapter framework (NIC gateway / mTLS)" --> VAHAN
+  APIP --> SARTHI
+  APIP --> EGUJ
+  APIP --> AFIS
+  USERS["Control rooms, district SPs, 26 departments<br/>role-scoped UI over HTTPS"] --> LB
+  USERS -- "live video via nearest regional relay" --> RELAY

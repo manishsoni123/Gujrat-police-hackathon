@@ -1,0 +1,24 @@
+%% Sentinel Gujarat – vehicle route search (Phase 2 test; plan 3.4, contract §5.10)
+sequenceDiagram
+  participant Op as Operator
+  participant UI as React (/vehicles)
+  participant API as FastAPI
+  participant DB as PostgreSQL
+
+  Op->>UI: enter "GJ 01 AB 1234" + time window (default 24 h)
+  UI->>API: GET /api/vehicles/search?q=&from=&to=
+  API->>API: normalise query (§3.4) → GJ01AB1234
+  API->>DB: exact: sightings WHERE plate_norm = :q AND first_seen BETWEEN :from AND :to
+  API->>DB: fuzzy: plate_reads WHERE levenshtein(plate_norm,:q) ≤ 2 OR similarity(plate_raw,:q) > 0.6, grouped by sighting
+  DB-->>API: ranked hits with crops (score = 0.7·(1 − d/3) + 0.3·best_conf)
+  API-->>UI: {exact[], fuzzy[], cameras_seen}
+  Op->>UI: confirm / reject fuzzy candidates (crops on screen)
+  UI->>API: POST /api/vehicles/{plate}/confirm {decisions[]}  (audited)
+  Op->>UI: Build route
+  UI->>API: GET /api/vehicles/{plate}/route?from&to&include=confirmed
+  API->>API: order by first_seen · merge same-camera sightings ≤ 60 s<br/>haversine distance + speed per leg · flag > 150 km/h, long_gap, overlap
+  API-->>UI: {sightings[], polyline[[lat,lon]], legs[], flags[], total_distance_km}
+  UI->>UI: numbered markers + polyline + timeline (IST) + crops + amber flag badges
+  Op->>UI: Export PDF
+  UI->>API: GET /api/vehicles/{plate}/route.pdf
+  API-->>Op: PDF (map, table, crops, SHA-256 footer, watermark) + X-Sentinel-Sha256

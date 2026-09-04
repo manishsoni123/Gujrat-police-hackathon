@@ -1,0 +1,7 @@
+# SHA-256 of the model weights used by the Sentinel Gujarat ANPR worker.
+# Format: <sha256>  <file name>  <source url>  <licence>
+# Verified by anpr/weights/download.py at image build time (--require: a missing or mismatched
+# weight fails the build) and again at worker start (verify_weight_file, called by
+# anpr/detector.py build_detector and anpr/pipeline.py before each ONNX session is created).
+888397b96d761c89db40bc9c305838e8652660f5e282c2cadebbe8d2951a77a8  yolo-v9-t-384-license-plates-end2end.onnx  https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-t-384-license-plates-end2end.onnx  MIT (open-image-models)
+c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063  yolox_s.onnx  https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx  Apache-2.0 (Megvii YOLOX)

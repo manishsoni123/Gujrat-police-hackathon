@@ -1,0 +1,31 @@
+# Developer conveniences - never use on the public VM.
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.debug.yml \
+#     --env-file deploy/.env --project-directory . up -d
+#
+# Publishes PostgreSQL on localhost:5432 (psql / DBeaver) and binds every
+# MediaMTX diagnostic port on all interfaces so a phone on the same Wi-Fi can
+# play rtsp://<laptop-ip>:8554/stream/1 directly.
+#
+# The mediamtx `ports` list uses the compose `!override` tag: without it
+# compose UNIONS the lists, so the base file's "127.0.0.1:8554:8554" and this
+# file's "8554:8554" both bind the same container port and Docker refuses to
+# start the container ("failed to bind host port 127.0.0.1:8554/tcp: address
+# already in use"). The 8189 ICE entries are repeated here because the
+# override replaces the whole list. Equivalent without this file:
+# MTX_BIND=0.0.0.0 in deploy/.env.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  mediamtx:
+    ports: !override
+      - "8189:8189/udp"
+      - "8189:8189/tcp"
+      - "8554:8554"
+      - "8888:8888"
+      - "8889:8889"
+      - "9996:9996"
+      - "9997:9997"

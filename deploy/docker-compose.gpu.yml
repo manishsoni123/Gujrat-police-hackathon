@@ -1,0 +1,47 @@
+# GPU overrides for the NVIDIA VM (T4 / g4dn.2xlarge / NC8as_T4_v3).
+#
+# Use together with COMPOSE_PROFILES=gpu in deploy/.env:
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml \
+#     --env-file deploy/.env --project-directory . up -d --build
+#
+# What it changes:
+#   - mediamtx is rebuilt from deploy/mediamtx-nvidia.Dockerfile: the same
+#     MediaMTX v1.20.1 binary on top of jrottenberg/ffmpeg:6.1-nvidia2204, so
+#     the runOnDemand `cam_<id>_h264` transcode paths can use h264_nvenc and
+#     -hwaccel cuda. The container gets one GPU with the "video" capability.
+#   - api gets MEDIAMTX_TRANSCODE=nvenc so it emits the NVENC ffmpeg command
+#     from CONTRACT §8.3 when it creates `_h264` paths.
+# The anpr-live-gpu / anpr-preindex-gpu services themselves are declared in
+# docker-compose.yml under the `gpu` profile (compose profiles cannot rewrite
+# a service, so the GPU workers are separate services with the same
+# container names as their CPU twins).
+#
+# Requirements on the host: NVIDIA driver >= 535, nvidia-container-toolkit
+# (deploy.sh --gpu installs it), `docker info` listing the nvidia runtime.
+
+services:
+  mediamtx:
+    build:
+      context: .
+      dockerfile: deploy/mediamtx-nvidia.Dockerfile
+    image: sentinel-mediamtx:nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        limits:
+          cpus: "${MEDIAMTX_CPUS:-4}"
+          memory: ${MEDIAMTX_MEMORY:-4g}
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video]
+
+  api:
+    environment:
+      # Forced (not ${MEDIAMTX_TRANSCODE}) so the CPU default in deploy/.env
+      # cannot silently disable NVENC on the GPU VM. Drop this file to keep
+      # libx264 transcoding on a GPU host.
+      MEDIAMTX_TRANSCODE: nvenc

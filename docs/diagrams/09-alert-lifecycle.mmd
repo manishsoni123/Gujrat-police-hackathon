@@ -1,0 +1,14 @@
+%% Sentinel Gujarat – alert lifecycle and escalation (contract §5.12)
+stateDiagram-v2
+  [*] --> new : matcher creates alert (exact / possible) or poller (camera_offline)
+  new --> new : suppression attaches read (read_count++, alert_update)
+  new --> acknowledged : POST /alerts/{id}/ack {note}  (operator / dept_admin / admin)
+  new --> closed : POST /alerts/{id}/close {outcome, note} (sets acknowledged_* too)
+  acknowledged --> closed : POST /alerts/{id}/close {outcome}
+  new --> closed : auto-close (camera_offline when camera returns; outcome=resolved)
+  closed --> [*]
+  note right of new
+    escalated = status is new AND age > alerts.escalate_minutes (5 min)
+    priority = max(watchlist.priority, reason_floor), one step lower for 'possible'
+    every transition is audited (alert.ack / alert.close / alert.auto_close)
+  end note

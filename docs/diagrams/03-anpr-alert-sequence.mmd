@@ -1,0 +1,33 @@
+%% Sentinel Gujarat – ANPR → sighting → watchlist → alert, Model 2 (plan 3.3, contract §5.12 / §7 / §9)
+sequenceDiagram
+  participant MTX as MediaMTX relay (rtsp://mediamtx:8554/cam_id)
+  participant FF as ffmpeg decoder (one per camera)
+  participant W as ANPR worker (inference loop)
+  participant API as FastAPI (matcher in-process)
+  participant DB as PostgreSQL
+  participant UI as Browser (WebSocket /ws/alerts)
+
+  MTX->>FF: RTSP over TCP, reconnect with 2→30 s backoff
+  FF->>W: raw BGR frames, fps=5 (PTS-driven), scale=960:-1
+  loop every frame
+    W->>W: plate detector (ONNX YOLO-v9-t · contour fallback)
+    W->>W: PaddleOCR on ×3 upscaled crop (two-line aware)
+    W->>W: normalise (contract §3.4, position-aware confusion map)
+    W->>W: 3 s char-wise vote → accepted read
+    W->>W: open / extend sighting (camera, plate_norm)
+    W->>W: every 5th frame: YOLOX-s counts (person/car/bus/truck/…)
+  end
+  Note over W: PTS jumps back or decoder restart → loop_reset:<br/>close sightings, clear votes, emit event
+  W->>API: POST /internal/detections (multipart: payload JSON + crop_n.jpg + frame_n.jpg)
+  API->>DB: UPSERT sightings BY worker_key · INSERT plate_reads (crop path + SHA-256)
+  API->>API: match plate_norm against in-memory watchlist map (exact, or levenshtein ≤ 1 if conf ≥ 0.8)
+  alt watchlist hit
+    API->>API: suppression? same (watchlist, camera) within 60 s → attach read
+    API->>API: priority = max(watchlist.priority, reason_floor), −1 level if 'possible'
+    API->>DB: INSERT alerts (latency_ms = now − captured_at), events(watchlist_hit), watchlist.hit_count++
+    API-->>UI: {type:"alert", data: Alert + notify_title + notify_body + sound}
+    API-->>API: webhooks (alert.created, HMAC) · Telegram (P2)
+    UI->>UI: toast + sound + desktop notification + panel + map flash
+  end
+  API-->>UI: {type:"read"} on /ws/reads/{camera_id} (live overlay)
+  API-->>W: 200 {accepted_reads, alerts_created, rejected[]}

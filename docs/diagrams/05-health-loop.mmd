@@ -1,0 +1,20 @@
+%% Sentinel Gujarat – camera health monitoring loop (plan 3.5, contract §5.6)
+flowchart LR
+  T["APScheduler tick<br/>every HEALTH_POLL_SECONDS (60 s)"] --> A["GET mediamtx /v3/paths/list<br/>ready · tracks · bytesReceived · readers"]
+  T --> A2["GET /v3/config/paths/list<br/>missing path → re-create (self-healing)"]
+  T --> B["Catalogue live flag<br/>(from last import)"]
+  A --> C{"ready?"}
+  C -- "no, live≠false, has rtsp_url" --> PR["Active ffprobe over TCP<br/>≤ 20 idle cameras per tick, 4 in parallel"]
+  C -- "yes" --> S
+  PR --> S["camera_health_log row per camera<br/>is_ready · has_video · bytes_delta · source_flag"]
+  B -- "live=false → not probed, source_flag=catalogue" --> S
+  S --> U{"State machine"}
+  U -- "ready ∧ video ∧ (bytes↑ ∨ probe)" --> ON["online · last_seen_at · fail_count=0"]
+  U -- "ready ∧ (no video ∨ bytes=0)" --> DG["degraded"]
+  U -- "not ready × 3 consecutive" --> OFF["offline · alert(camera_offline, low)<br/>event(camera_offline)"]
+  OFF -- "returns" --> AC["auto-close alert · event(camera_online)"]
+  ON --> W["WS /ws/health: health (on change) · stats (every 10 s)"]
+  DG --> W
+  OFF --> W
+  AC --> W
+  W --> D["Dashboard tiles · health page · map marker colour"]

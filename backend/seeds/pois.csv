@@ -1,0 +1,53 @@
+name,type,district,lat,lon
+Sachivalaya Main Gate,govt_office,Gandhinagar,23.2240,72.6475
+Sector 21 Government School,school,Gandhinagar,23.2301,72.6410
+Pethapur Checkpost,checkpost,Gandhinagar,23.2740,72.6580
+Civil Hospital Gandhinagar,hospital,Gandhinagar,23.2280,72.6490
+Sector 11 Bus Stand,bus_stand,Gandhinagar,23.2302,72.6298
+Koba Circle Highway Point,highway,Gandhinagar,23.1655,72.6548
+Gandhinagar Railway Station,railway_station,Gandhinagar,23.2140,72.6300
+Sargasan Cross Roads,highway,Gandhinagar,23.2010,72.6280
+Akshardham Temple Gandhinagar,temple,Gandhinagar,23.2280,72.6712
+Sector 16 Market,market,Gandhinagar,23.2325,72.6520
+GIFT City Gate,govt_office,Gandhinagar,23.1590,72.6840
+Adalaj Toll Plaza,checkpost,Gandhinagar,23.1720,72.5830
+Kalupur Railway Station,railway_station,Ahmedabad,23.0270,72.6010
+Civil Hospital Asarwa,hospital,Ahmedabad,23.0530,72.6065
+Geeta Mandir Bus Station,bus_stand,Ahmedabad,23.0092,72.5962
+Sardar Patel Airport Terminal 1,govt_office,Ahmedabad,23.0730,72.6310
+Iskcon Temple SG Highway,temple,Ahmedabad,23.0282,72.5065
+Manek Chowk Market,market,Ahmedabad,23.0240,72.5880
+Narol Naroda Highway Point,highway,Ahmedabad,22.9670,72.6170
+Vastrapur Lake Garden,other,Ahmedabad,23.0390,72.5290
+Vadodara Railway Station,railway_station,Vadodara,22.3100,73.1810
+SSG Hospital Vadodara,hospital,Vadodara,22.3090,73.1900
+Vadodara Central Bus Stand,bus_stand,Vadodara,22.3120,73.1800
+Makarpura GIDC Checkpost,checkpost,Vadodara,22.2545,73.1885
+Golden Bridge Toll Vadodara,highway,Vadodara,22.2650,73.1500
+Surat Railway Station,railway_station,Surat,21.2050,72.8410
+New Civil Hospital Surat,hospital,Surat,21.1825,72.8210
+Surat Central Bus Station,bus_stand,Surat,21.2025,72.8385
+Kamrej Toll Plaza NH-48,highway,Surat,21.2660,72.9580
+Hazira Port Gate,border,Surat,21.1120,72.6360
+Rajkot Junction,railway_station,Rajkot,22.3100,70.7950
+PDU Civil Hospital Rajkot,hospital,Rajkot,22.2990,70.7930
+Rajkot ST Bus Stand,bus_stand,Rajkot,22.2945,70.7985
+Gondal Road Chowkdi,highway,Rajkot,22.2705,70.8005
+Race Course Ground Rajkot,other,Rajkot,22.2990,70.7880
+Bhilad Border Checkpost,border,Valsad,20.2617,72.9150
+Vapi GIDC Checkpost,checkpost,Valsad,20.3890,72.9110
+Valsad Civil Hospital,hospital,Valsad,20.6100,72.9345
+Valsad Railway Station,railway_station,Valsad,20.6100,72.9250
+Dahod Bus Stand,bus_stand,Dahod,22.8347,74.2555
+Limkheda NH-47 Checkpost,checkpost,Dahod,22.8180,73.9775
+Dahod Railway Station,railway_station,Dahod,22.8380,74.2600
+Zalod Taluka Panchayat,govt_office,Dahod,23.1010,74.1690
+Somnath Temple,temple,Gir Somnath,20.8880,70.4010
+Veraval GSRTC Depot,bus_stand,Gir Somnath,20.9075,70.3665
+Veraval Fishing Harbour,border,Gir Somnath,20.9010,70.3620
+GG Hospital Jamnagar,hospital,Jamnagar,22.4705,70.0580
+Bedi Port Checkpost,border,Jamnagar,22.5000,70.0500
+Jamnagar Railway Station,railway_station,Jamnagar,22.4690,70.0350
+Dwarkadhish Temple,temple,Devbhumi Dwarka,22.2376,68.9670
+Khambhaliya GSRTC Depot,bus_stand,Devbhumi Dwarka,22.2095,69.6519
+Okha Port Checkpost,border,Devbhumi Dwarka,22.4690,69.0710

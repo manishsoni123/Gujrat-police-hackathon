@@ -1,0 +1,203 @@
+# Sentinel Gujarat - Caddy configuration (CONTRACT §1.2).
+#
+# Copied to /etc/caddy/Caddyfile in the `web` image (frontend/Dockerfile,
+# stage 2 = caddy:2) which serves the built SPA from /srv.
+#
+# CADDY_SITE_ADDRESS  ":80" on the laptop (plain HTTP, no certificates);
+#                     the FQDN on the VM, e.g. "sentinel.dynatech.in" ->
+#                     Caddy obtains a Let's Encrypt certificate automatically
+#                     and redirects :80 to HTTPS. Ports 80 and 443 must be
+#                     published and reachable from the Internet.
+# CADDY_ACME_EMAIL_LINE  set by docker-compose.yml to "email <CADDY_EMAIL>"
+#                     when CADDY_EMAIL is non-empty, otherwise empty. Caddy
+#                     rejects an `email` directive with an empty argument, so
+#                     the whole line is injected (Caddy expands {$VAR} before
+#                     tokenising). ACME works without an e-mail address.
+#
+# Upstreams are compose service names: api:8000, mediamtx:8889 (WHEP),
+# mediamtx:8888 (HLS), mediamtx:9996 (playback).
+{
+	admin off
+	{$CADDY_ACME_EMAIL_LINE}
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# ---------------------------------------------------------------- snippets
+
+(security_headers) {
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-Server
+	}
+	# HSTS only on the TLS site (the VM). Browsers ignore it over plain HTTP
+	# anyway, but keeping it off the :80 laptop address avoids surprising a
+	# developer who later serves something else on localhost over HTTPS.
+	@https protocol https
+	header @https Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
+
+# Content-Security-Policy for the SPA document only (not for /api/docs, which
+# is Swagger UI with its own inline script, and not for proxied JSON/media).
+# What the build needs:
+#   script-src 'self'          Vite emits only external module scripts under /assets
+#   script-src-attr            one inline onerror= on the map popup <img> (MapPage.tsx)
+#   style-src 'unsafe-inline'  antd CSS-in-JS + Leaflet/React inline styles
+#   img-src                    snapshots/crops from /media, data:/blob: (Leaflet
+#                              markers, canvas), OpenStreetMap tiles
+#   media-src blob: data:      hls.js MSE source, alert sounds
+#   connect-src ws: wss:       /ws/* on the same origin (old browsers do not
+#                              treat 'self' as covering WebSocket schemes)
+#   worker-src blob:           hls.js transmuxer worker
+(spa_csp) {
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org; font-src 'self' data:; media-src 'self' blob: data:; connect-src 'self' ws: wss:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+}
+
+# Every /mtx/* and /playback/* request is authorised by the API first
+# (Bearer header, sg_session cookie or ?token=). The API answers 204 and adds
+# X-Sentinel-User / X-Sentinel-Role, which are copied upstream; a 401 is
+# returned to the browser unchanged. X-Forwarded-Uri carries the original
+# path + query so the API can read ?token= for <video>/<img> elements.
+(sentinel_auth) {
+	forward_auth api:8000 {
+		uri /api/auth/verify
+		copy_headers X-Sentinel-User X-Sentinel-Role
+	}
+}
+
+(api_proxy) {
+	reverse_proxy api:8000 {
+		header_up X-Real-IP {remote_host}
+		# WebSocket upgrades pass through untouched; long polls / large
+		# CSV uploads / PDF generation need generous timeouts.
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+			dial_timeout 10s
+		}
+	}
+}
+
+# ---------------------------------------------------------------- public site
+
+{$CADDY_SITE_ADDRESS::80} {
+	import security_headers
+	encode zstd gzip
+
+	request_body {
+		max_size 200MB
+	}
+
+	# ---- Worker ingestion routes are never reachable from the Internet.
+	# The ANPR workers post to api:8000 directly inside the compose network
+	# (CONTRACT §1.2), so /api/internal/* has no browser client; answering 404
+	# here means a leaked or default INTERNAL_API_KEY cannot be used from
+	# outside to fabricate reads, sightings or alerts. Caddy sorts `handle`
+	# blocks by path length, so this wins over /api/* regardless of order.
+	@internal path /api/internal/*
+	handle @internal {
+		respond 404
+	}
+
+	# ---- REST API, OpenAPI docs, mock sandbox, liveness
+	@api path /api/* /healthz
+	handle @api {
+		import api_proxy
+	}
+
+	# ---- WebSockets (/ws/alerts, /ws/reads/{id}, /ws/health)
+	handle /ws/* {
+		import api_proxy
+	}
+
+	# ---- Stored files (crops, frames, snapshots, clips, reports); auth in the API
+	handle /media/* {
+		import api_proxy
+	}
+
+	# ---- MediaMTX: WHEP (WebRTC) on 8889, HLS on 8888. Prefix /mtx is stripped.
+	handle_path /mtx/* {
+		import sentinel_auth
+
+		# POST /<path>/whep (offer), PATCH|DELETE /<path>/whep/<session>, OPTIONS
+		@whep path_regexp whep ^/(.+)/whep(/[^/]+)?$
+		handle @whep {
+			reverse_proxy mediamtx:8889 {
+				# MediaMTX answers the offer with "Location: /<path>/whep/<session>"
+				# (relative to its own root). Re-prefix it so the browser's ICE
+				# trickle PATCH and teardown DELETE come back through /mtx/.
+				header_down Location ^/(.*)$ /mtx/$1
+				transport http {
+					dial_timeout 5s
+				}
+			}
+		}
+
+		# index.m3u8, *.ts, *.mp4, *.m4s. MediaMTX 1.20 answers the first
+		# index.m3u8 request with a 302 to "/<path>/index.m3u8?cookieCheck=1"
+		# (relative to its root); re-prefix it as well so hls.js stays under /mtx/.
+		handle {
+			reverse_proxy mediamtx:8888 {
+				header_down Location ^/(.*)$ /mtx/$1
+				transport http {
+					dial_timeout 5s
+				}
+			}
+		}
+	}
+
+	# ---- MediaMTX playback server (recordings): /playback/list, /playback/get
+	handle_path /playback/* {
+		import sentinel_auth
+		reverse_proxy mediamtx:9996 {
+			transport http {
+				dial_timeout 5s
+				read_timeout 10m
+			}
+		}
+	}
+
+	# ---- SPA (React build in /srv) with history fallback
+	handle {
+		root * /srv
+		import spa_csp
+
+		@immutable path /assets/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+		@html path / /index.html
+		header @html Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}
+
+# ---------------------------------------------------------------- container-internal health site
+#
+# Used by the compose healthcheck (wget http://127.0.0.1:8080/healthz). It is
+# not published on the host. It proxies to the API so "web healthy" means
+# Caddy is up AND can reach the API.
+
+http://127.0.0.1:8080, http://localhost:8080 {
+	handle /healthz {
+		reverse_proxy api:8000 {
+			transport http {
+				dial_timeout 3s
+			}
+		}
+	}
+	handle {
+		respond "Sentinel Gujarat web: ok" 200
+	}
+}

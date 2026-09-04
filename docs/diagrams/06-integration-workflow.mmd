@@ -1,0 +1,44 @@
+%% Sentinel Gujarat – the four-box "complete integration workflow" the portal requires
+%% (database structure · matching logic · alerting mechanism · user interface)
+flowchart LR
+  subgraph DBX["1 · Database structure (PostgreSQL 16)"]
+    direction TB
+    D1["cameras (id, department, lat/lon, relay_path, status…)"]
+    D2["plate_reads (plate_raw, plate_norm, confidence, crop_path, crop_sha256, captured_at)"]
+    D3["sightings (worker_key, plate_norm, first_seen, last_seen, read_count, best_crop)"]
+    D4["watchlist (plate_norm, entity_type, reason, priority, source, expires_at)"]
+    D5["alerts (type, priority, confidence_level, status, latency_ms, snapshot_sha256)"]
+    D6["events · route_confirmations · audit_log (append-only trigger)"]
+  end
+  subgraph ML["2 · Matching logic (in-process, per accepted read)"]
+    direction TB
+    M1["normalise(plate) → GJ01AB1234 (contract §3.4)"]
+    M2["exact lookup in in-memory {plate_norm → watchlist}"]
+    M3["else conf ≥ 0.8 ∧ levenshtein = 1 → 'possible'"]
+    M4["suppression: same (watchlist, camera) ≤ 60 s → attach read"]
+    M5["priority = max(entry.priority, reason_floor) − 1 if possible"]
+  end
+  subgraph AL["3 · Alerting mechanism"]
+    direction TB
+    A1["INSERT alerts + events(watchlist_hit)"]
+    A2["WebSocket /ws/alerts envelope {alert, notify_title, notify_body, sound}"]
+    A3["Browser Notification API (tab in background)"]
+    A4["Outbound webhook (HMAC-SHA256) · Telegram (P2)"]
+    A5["Escalation badge when unacknowledged > 5 min"]
+  end
+  subgraph UIX["4 · User interface"]
+    direction TB
+    U1["Toast + sound + bell count + map marker flash"]
+    U2["Alert panel sorted by priority then time; Ack / Close with note"]
+    U3["Drawer: crop, camera, mini-map, Play recording, Create clip"]
+    U4["Vehicle search → confirm hits → route + timeline → PDF"]
+  end
+  D2 --> M1
+  D4 --> M2
+  M1 --> M2 --> M3 --> M4 --> M5 --> A1
+  A1 --> D5
+  A1 --> A2 --> U1
+  A2 --> A3
+  A1 --> A4
+  A5 --> U2
+  U1 --> U2 --> U3 --> U4

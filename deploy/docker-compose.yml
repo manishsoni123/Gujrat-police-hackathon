@@ -1,0 +1,411 @@
+# Sentinel Gujarat - Docker Compose stack (CONTRACT §1.1).
+#
+# Run from the repository root:
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env --project-directory . up -d --build
+#
+# Profiles (COMPOSE_PROFILES in deploy/.env):
+#   cpu   (default) anpr-live + anpr-preindex, software decode, ONNX CPU provider
+#   gpu   anpr-live-gpu + anpr-preindex-gpu (NVIDIA runtime). Add
+#         -f deploy/docker-compose.gpu.yml for the NVENC MediaMTX build and
+#         MEDIAMTX_TRANSCODE=nvenc (or set that variable in deploy/.env).
+#   tools one-shot `synth` generator: --profile tools run --rm synth
+#   preindex alias that starts only the CPU pre-index worker (e.g. overnight on the
+#         laptop): --profile preindex up -d anpr-preindex. It is also part of `cpu`.
+# Debug port publishing (5432, 8554): add -f deploy/docker-compose.debug.yml
+#
+# Image pins:
+#   postgis/postgis:16-3.4             sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
+#   bluenviron/mediamtx:1.20.1-ffmpeg  sha256:16c56911dbd1fd7a85455042fa8320779fc8bf6575c6903f74023b202c1a620c (MediaMTX v1.20.1, ffmpeg 8.1.2; pinned by digest in the image line)
+#   caddy:2 (frontend/Dockerfile stage 2), node:24-alpine, python:3.11-slim
+
+name: sentinel
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# Variables every ANPR worker shares (CONTRACT §1.3, "ANPR worker"). The
+# per-service blocks below add CPU, ANPR_MODE and ANPR_MAX_CAMERAS.
+x-anpr-env: &anpr-env
+  API_URL: http://api:8000
+  INTERNAL_API_KEY: ${INTERNAL_API_KEY:-sk_internal0000000000000000000000000000000000}
+  RTSP_BASE: rtsp://mediamtx:8554
+  ANPR_CAMERAS: ${ANPR_CAMERAS:-}
+  ANPR_FPS: ${ANPR_FPS:-5}
+  PREINDEX_FPS: ${PREINDEX_FPS:-1}
+  PREINDEX_SKIP_LIVE: ${PREINDEX_SKIP_LIVE:-1}
+  FRAME_WIDTH: ${FRAME_WIDTH:-960}
+  ANPR_DETECTOR: ${ANPR_DETECTOR:-auto}
+  ANPR_DET_MODEL: ${ANPR_DET_MODEL:-/app/weights/yolo-v9-t-384-license-plates-end2end.onnx}
+  ANPR_DET_CONF: ${ANPR_DET_CONF:-0.4}
+  ANPR_MIN_PLATE_W: ${ANPR_MIN_PLATE_W:-60}
+  ANPR_VOTE_WINDOW_S: ${ANPR_VOTE_WINDOW_S:-3}
+  ANPR_MIN_READ_CONF: ${ANPR_MIN_READ_CONF:-0.30}
+  SIGHTING_CLOSE_S: ${SIGHTING_CLOSE_S:-15}
+  SNAPSHOT_INTERVAL_S: ${SNAPSHOT_INTERVAL_S:-1}
+  SNAPSHOT_WIDTH: ${SNAPSHOT_WIDTH:-480}
+  POST_BATCH_S: ${POST_BATCH_S:-1}
+  CONFIG_RELOAD_S: ${CONFIG_RELOAD_S:-60}
+  HEARTBEAT_S: ${HEARTBEAT_S:-15}
+  OBJECT_DETECT: ${OBJECT_DETECT:-1}
+  OBJECT_MODEL: ${OBJECT_MODEL:-/app/weights/yolox_s.onnx}
+  OBJECT_CONF: ${OBJECT_CONF:-0.35}
+  OBJECT_EVERY_N: ${OBJECT_EVERY_N:-5}
+  OCR_LANG: ${OCR_LANG:-en}
+  RECONNECT_MIN_S: ${RECONNECT_MIN_S:-2}
+  RECONNECT_MAX_S: ${RECONNECT_MAX_S:-30}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  TZ: UTC
+
+services:
+  # ---------------------------------------------------------------- postgres
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: sentinel-postgres
+    restart: unless-stopped
+    logging: *default-logging
+    shm_size: 256m
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "${POSTGRES_CPUS:-2}"
+          memory: ${POSTGRES_MEMORY:-1g}
+
+  # ---------------------------------------------------------------- mediamtx
+  mediamtx:
+    image: bluenviron/mediamtx:1.20.1-ffmpeg@sha256:16c56911dbd1fd7a85455042fa8320779fc8bf6575c6903f74023b202c1a620c
+    container_name: sentinel-mediamtx
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      MTX_WEBRTCADDITIONALHOSTS: ${MTX_WEBRTCADDITIONALHOSTS:-127.0.0.1}
+      MTX_LOGLEVEL: ${MTX_LOGLEVEL:-info}
+      TZ: UTC
+    ports:
+      # WebRTC ICE mux (must be reachable from every browser; open on the VM firewall)
+      - "8189:8189/udp"
+      - "8189:8189/tcp"
+      # Local-only diagnostics: RTSP, WHEP, HLS, playback, control API. They are
+      # bound to MTX_BIND (127.0.0.1 by default) so nothing bypasses Caddy's
+      # forward_auth from outside the host. Set MTX_BIND=0.0.0.0 only on a LAN
+      # test box; the organiser-style URLs rtsp://<host>:8554/stream/<id> then work.
+      - "${MTX_BIND:-127.0.0.1}:8554:8554"
+      - "${MTX_BIND:-127.0.0.1}:8888:8888"
+      - "${MTX_BIND:-127.0.0.1}:8889:8889"
+      - "${MTX_BIND:-127.0.0.1}:9996:9996"
+      - "${MTX_BIND:-127.0.0.1}:9997:9997"
+    volumes:
+      - ./deploy/mediamtx.yml:/mediamtx.yml:ro
+      - ./media:/media:ro
+      - recordings:/recordings
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9997/v3/paths/list >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "${MEDIAMTX_CPUS:-4}"
+          memory: ${MEDIAMTX_MEMORY:-2g}
+
+  # ---------------------------------------------------------------- api
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: sentinel-api:${APP_VERSION:-1.0.0-phase1}
+    container_name: sentinel-api
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    environment:
+      APP_VERSION: ${APP_VERSION:-1.0.0-phase1}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/${POSTGRES_DB:-sentinel}}
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      JWT_SECRET: ${JWT_SECRET:-change-me-sentinel-gujarat-2026-please}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-8}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:5173,http://127.0.0.1:5173}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      DATA_DIR: /data
+      MEDIA_DIR: /media
+      RECORDINGS_DIR: /recordings
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+      MEDIAMTX_RTSP_LOCAL_URL: rtsp://localhost:8554
+      MEDIAMTX_HLS_URL: http://mediamtx:8888
+      MEDIAMTX_PLAYBACK_URL: http://mediamtx:9996
+      MEDIAMTX_TRANSCODE: ${MEDIAMTX_TRANSCODE:-cpu}
+      MOCK_SANDBOX: ${MOCK_SANDBOX:-1}
+      SANDBOX_BASE_URL: ${SANDBOX_BASE_URL:-http://api:8000/mock-sandbox}
+      SANDBOX_AUTH_TYPE: ${SANDBOX_AUTH_TYPE:-none}
+      SANDBOX_USERNAME: ${SANDBOX_USERNAME:-}
+      SANDBOX_PASSWORD: ${SANDBOX_PASSWORD:-}
+      SANDBOX_AUTH_HEADER: ${SANDBOX_AUTH_HEADER:-}
+      SANDBOX_TIMEOUT_S: ${SANDBOX_TIMEOUT_S:-30}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-sk_internal0000000000000000000000000000000000}
+      BULK_API_KEY: ${BULK_API_KEY:-sk_bulk00000000000000000000000000000000000000}
+      JURY_ADMIN_PASSWORD: ${JURY_ADMIN_PASSWORD:-Sentinel@Admin2026}
+      JURY_OPERATOR_PASSWORD: ${JURY_OPERATOR_PASSWORD:-Sentinel@Ops2026}
+      JURY_VIEWER_PASSWORD: ${JURY_VIEWER_PASSWORD:-Sentinel@View2026}
+      DEPT_ADMIN_PASSWORD: ${DEPT_ADMIN_PASSWORD:-Sentinel@Police2026}
+      SEED_ON_START: ${SEED_ON_START:-1}
+      HEALTH_POLL_SECONDS: ${HEALTH_POLL_SECONDS:-60}
+      HEALTH_OFFLINE_AFTER: ${HEALTH_OFFLINE_AFTER:-3}
+      HEALTH_PROBE_MAX: ${HEALTH_PROBE_MAX:-20}
+      HEALTH_PROBE_TIMEOUT_S: ${HEALTH_PROBE_TIMEOUT_S:-6}
+      ANPR_AUTO_ENABLE_MAX: ${ANPR_AUTO_ENABLE_MAX:-12}
+      ALERT_SUPPRESSION_SECONDS: ${ALERT_SUPPRESSION_SECONDS:-60}
+      FUZZY_ALERT_MIN_CONF: ${FUZZY_ALERT_MIN_CONF:-0.8}
+      ALERT_ESCALATE_MINUTES: ${ALERT_ESCALATE_MINUTES:-5}
+      ROUTE_SPEED_FLAG_KMH: ${ROUTE_SPEED_FLAG_KMH:-150}
+      ROUTE_DEFAULT_WINDOW_HOURS: ${ROUTE_DEFAULT_WINDOW_HOURS:-24}
+      GAP_COVERAGE_RADIUS_M: ${GAP_COVERAGE_RADIUS_M:-150}
+      GAP_POI_RADIUS_M: ${GAP_POI_RADIUS_M:-300}
+      GAP_GRID_M: ${GAP_GRID_M:-500}
+      AGEING_YEARS: ${AGEING_YEARS:-5}
+      GAP_CACHE_SECONDS: ${GAP_CACHE_SECONDS:-300}
+      RETENTION_DAYS_FRAMES: ${RETENTION_DAYS_FRAMES:-7}
+      RETENTION_DAYS_READS: ${RETENTION_DAYS_READS:-30}
+      RETENTION_DAYS_CLIPS: ${RETENTION_DAYS_CLIPS:-90}
+      RETENTION_JOB_HOUR_UTC: ${RETENTION_JOB_HOUR_UTC:-21}
+      SNAPSHOT_STALE_SECONDS: ${SNAPSHOT_STALE_SECONDS:-10}
+      WS_STATS_INTERVAL_S: ${WS_STATS_INTERVAL_S:-10}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      LOGIN_RATE_LIMIT_PER_MIN: ${LOGIN_RATE_LIMIT_PER_MIN:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ_DISPLAY: Asia/Kolkata
+      TZ: UTC
+    volumes:
+      - sentinel_data:/data
+      - ./media:/media:ro
+      - recordings:/recordings:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPUS:-2}"
+          memory: ${API_MEMORY:-1536m}
+
+  # ---------------------------------------------------------------- web (Caddy + SPA)
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: sentinel-web:${APP_VERSION:-1.0.0-phase1}
+    container_name: sentinel-web
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      api:
+        condition: service_started
+      mediamtx:
+        condition: service_started
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
+      CADDY_EMAIL: ${CADDY_EMAIL:-}
+      # Whole `email ...` global directive, or empty (see deploy/Caddyfile header)
+      CADDY_ACME_EMAIL_LINE: ${CADDY_EMAIL:+email ${CADDY_EMAIL}}
+      TZ: UTC
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      # Port 8080 is a container-internal health site in the Caddyfile that
+      # proxies /healthz to the API regardless of the public site address
+      # (on the VM port 80 only redirects to HTTPS).
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "${WEB_CPUS:-1}"
+          memory: ${WEB_MEMORY:-256m}
+
+  # ---------------------------------------------------------------- ANPR workers (CPU profile, default)
+  anpr-live:
+    build:
+      context: .
+      dockerfile: anpr/Dockerfile
+      args:
+        ANPR_BASE: cpu
+    image: sentinel-anpr:cpu
+    container_name: sentinel-anpr-live
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["cpu"]
+    depends_on:
+      api:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    environment:
+      <<: *anpr-env
+      CPU: "1"
+      ANPR_MODE: live
+      ANPR_MAX_CAMERAS: ${ANPR_MAX_CAMERAS:-3}
+      WORKER_ID: ${ANPR_LIVE_WORKER_ID:-live-cpu}
+    deploy:
+      resources:
+        limits:
+          cpus: "${ANPR_LIVE_CPUS:-6}"
+          memory: ${ANPR_LIVE_MEMORY:-3g}
+
+  anpr-preindex:
+    build:
+      context: .
+      dockerfile: anpr/Dockerfile
+      args:
+        ANPR_BASE: cpu
+    image: sentinel-anpr:cpu
+    container_name: sentinel-anpr-preindex
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["cpu", "preindex"]
+    depends_on:
+      api:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    environment:
+      <<: *anpr-env
+      CPU: "1"
+      ANPR_MODE: preindex
+      ANPR_MAX_CAMERAS: ${PREINDEX_MAX_CAMERAS:-3}
+      WORKER_ID: ${ANPR_PREINDEX_WORKER_ID:-preindex-cpu}
+    deploy:
+      resources:
+        limits:
+          cpus: "${ANPR_PREINDEX_CPUS:-3}"
+          memory: ${ANPR_PREINDEX_MEMORY:-2g}
+
+  # ---------------------------------------------------------------- ANPR workers (GPU profile, NVIDIA VM only)
+  anpr-live-gpu:
+    build:
+      context: .
+      dockerfile: anpr/Dockerfile
+      args:
+        ANPR_BASE: gpu
+    image: sentinel-anpr:gpu
+    container_name: sentinel-anpr-live
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["gpu"]
+    depends_on:
+      api:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    environment:
+      <<: *anpr-env
+      CPU: "0"
+      ANPR_MODE: live
+      ANPR_MAX_CAMERAS: ${ANPR_MAX_CAMERAS:-12}
+      WORKER_ID: ${ANPR_LIVE_WORKER_ID:-live-gpu}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  anpr-preindex-gpu:
+    build:
+      context: .
+      dockerfile: anpr/Dockerfile
+      args:
+        ANPR_BASE: gpu
+    image: sentinel-anpr:gpu
+    container_name: sentinel-anpr-preindex
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["gpu"]
+    depends_on:
+      api:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    environment:
+      <<: *anpr-env
+      CPU: "0"
+      ANPR_MODE: preindex
+      ANPR_MAX_CAMERAS: ${PREINDEX_MAX_CAMERAS:-50}
+      WORKER_ID: ${ANPR_PREINDEX_WORKER_ID:-preindex-gpu}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ---------------------------------------------------------------- tools
+  # One-shot synthetic camera video generator (CONTRACT §12.4):
+  #   docker compose -f deploy/docker-compose.yml --project-directory . --profile tools run --rm synth
+  synth:
+    build:
+      context: .
+      dockerfile: scripts/Dockerfile
+    image: sentinel-synth:${APP_VERSION:-1.0.0-phase1}
+    container_name: sentinel-synth
+    restart: "no"
+    logging: *default-logging
+    profiles: ["tools"]
+    command: ["python", "scripts/make_synthetic_videos.py"]
+    environment:
+      SYNTH_CAMERAS: ${SYNTH_CAMERAS:-8}
+      SYNTH_SECONDS: ${SYNTH_SECONDS:-90}
+      SYNTH_SEED: ${SYNTH_SEED:-42}
+      SYNTH_OUT: /media/synthetic
+      TZ: UTC
+    volumes:
+      - ./media:/media
+
+volumes:
+  pgdata:
+  sentinel_data:
+  recordings:
+  caddy_data:
+  caddy_config:

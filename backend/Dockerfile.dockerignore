@@ -1,0 +1,12 @@
+# BuildKit per-Dockerfile ignore file (context = repository root)
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.git
+frontend/node_modules
+frontend/dist
+media
+anpr
+deploy
+docs
+scripts

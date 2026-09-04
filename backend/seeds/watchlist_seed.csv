@@ -1,0 +1,24 @@
+plate,entity_type,name,reason,priority,source,notes,expires_at,is_active
+GJ01AB1234,vehicle,White Maruti Swift – FIR 123/2026 Sector 7 PS,stolen,critical,own,Reported stolen 2026-08-30 from Sector 7 Gandhinagar,,true
+GJ18CD5678,vehicle,Grey Hyundai Creta – wanted in Kalupur case,wanted,critical,egujcop,eGujCop reference EGC-2026-004411 – inactive by default so only one anchor plate raises critical alerts on the synthetic loop; activate it for a second live-hit demo,,false
+GJ05RS9012,vehicle,Blacklisted goods carrier (overloading),blacklisted,high,manual,RTO blacklist – repeat offender,,true
+MH02BZ7788,vehicle,Silver Honda City – missing person's vehicle,missing,medium,own,Missing person report MPR-2026-0912,,true
+GJ06KL4455,vehicle,Suspect vehicle – chain snatching pattern,suspect,low,manual,Seen near Infocity thrice,2026-12-31T18:30:00Z,true
+GJ27XY3456,vehicle,Demo plate (added live during the jury demo),suspect,low,manual,Not active by default – the demo adds it,,false
+GJ01CJ7788,vehicle,Black Toyota Fortuner – stolen,stolen,critical,own,,,true
+GJ03BM2210,vehicle,Red Bajaj Pulsar – stolen two-wheeler,stolen,high,own,,,true
+GJ05JE9834,vehicle,Wanted – Surat cheating case,wanted,critical,egujcop,,,true
+GJ12AK1001,vehicle,Blacklisted taxi – permit cancelled,blacklisted,medium,vahan,,,true
+GJ33AT5566,vehicle,Suspect – border movement Dahod,suspect,low,manual,,,true
+GJ38CH0007,vehicle,Suspect – Valsad narcotics watch,suspect,medium,manual,,,true
+DL3CAB9911,vehicle,Wanted – interstate,wanted,high,egujcop,,,true
+RJ14CV3030,vehicle,Stolen in Rajasthan – NCRB advisory,stolen,high,egujcop,,,true
+MP09HB6161,vehicle,Blacklisted – toll evasion,blacklisted,low,manual,,,true
+GJ10AD7070,vehicle,Missing – elderly driver,missing,medium,own,,,true
+GJ15CQ2424,vehicle,Suspect – Rajkot burglary pattern,suspect,low,manual,,2026-10-31T18:30:00Z,true
+GJ21AR8181,vehicle,Arrested person's vehicle (impound pending),arrested,high,egujcop,,,true
+KA01MJ4545,vehicle,Wanted – Bengaluru case (interstate lookout),wanted,high,egujcop,,,true
+GJ09BW0110,vehicle,Expired entry (kept for history),blacklisted,low,manual,,2026-08-01T00:00:00Z,true
+,person,Ramesh K. (wanted – Ahmedabad PS),wanted,critical,egujcop,FRS roadmap – no plate,,true
+,person,Unidentified body case UDB-2026-17,unidentified_body,medium,manual,AFIS/NAFIS readiness placeholder,,true
+,person,Missing minor – Surat,missing,high,own,,,true

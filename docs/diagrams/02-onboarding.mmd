@@ -1,0 +1,24 @@
+%% Sentinel Gujarat – camera onboarding, Model 1 (plan 3.2, contract §5.2 / §6 / §8.3)
+flowchart TD
+  A["Onboarding source"] --> B{"Which path?"}
+  B -- "Sandbox / departmental catalogue" --> C["GET {catalogue.base_url}/api/ingest<br/>(host, auth, field map from Settings)"]
+  B -- "API push from a departmental system" --> C2["POST /api/v1/cameras/bulk<br/>X-API-Key (scope bulk)"]
+  B -- "CSV bulk upload" --> D["Parse CSV template<br/>(31 columns, dry-run supported)"]
+  B -- "Manual form / own RTSP camera" --> E["Single camera form<br/>map click sets lat/lon"]
+  C --> F["Map to CameraImportRow<br/>catalogue.field_map + department aliases"]
+  C2 --> F
+  D --> F
+  E --> F
+  F --> G{"Validate row<br/>required · lat/lon range · codec · enum values<br/>duplicate external_id in batch · dept scope"}
+  G -- "invalid" --> H["Row → errors[] + error-report CSV"]
+  G -- "unknown department" --> H2["UNASSIGNED + warning (never a row error)"]
+  G -- "valid" --> I["UPSERT cameras ON (source, external_id)"]
+  H2 --> I
+  I --> J["audit_log (actor, before/after diff)"]
+  J --> K["MediaMTX POST /v3/config/paths/add/cam_&lt;id&gt;<br/>+ cam_&lt;id&gt;_h264 runOnDemand when codec = H265<br/>record: yes when record_enabled"]
+  K --> L["Health poller picks it up (60 s tick, ffprobe for idle paths)"]
+  L --> M{"anpr_enabled?"}
+  M -- "yes" --> N["ANPR worker sees it on next<br/>GET /internal/anpr-config (≤ 60 s)"]
+  M -- "no" --> O["Done"]
+  N --> O
+  O --> P["Visible in registry, on the GIS map and on the wall<br/>import summary: added/updated/errors/warnings,<br/>relay_paths_created, duration_ms, first_stream_ready_ms"]

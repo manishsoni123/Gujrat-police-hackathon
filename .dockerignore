@@ -1,0 +1,31 @@
+# Build context is the repository root for every image (deploy/docker-compose.yml).
+# Keep the context small: no media, no node_modules, no local data, no git history.
+.git
+.github
+.idea
+.vscode
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/venv
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/coverage
+media
+data
+recordings
+backups
+deploy/.env
+deploy/.env.*
+!deploy/.env.example
+docs/screenshots
+docs/*.pptx
+docs/*.pdf
+*.mp4
+*.mkv
+*.mov
+*.log

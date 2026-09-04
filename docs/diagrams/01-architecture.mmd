@@ -1,0 +1,34 @@
+%% Sentinel Gujarat – system architecture (HLD §3, plan 3.1, contract §1/§8)
+flowchart LR
+  subgraph SRC["Video sources (departmental systems, untouched)"]
+    SB["Organiser sandbox (~50 cameras)<br/>rtsp://host:8554/stream/{id}<br/>H.264 / H.265, looping"]
+    OWN["Own feed (private society camera)<br/>own_gate loop / phone RTSP"]
+    DEPT["Departmental NVR / VMS / IP cameras<br/>RTSP · ONVIF (P2) · vendor SDK (roadmap)"]
+  end
+
+  subgraph WEB["Web VM – Docker Compose behind Caddy (HTTPS)"]
+    CADDY["Caddy<br/>TLS · SPA · reverse proxy<br/>forward_auth on /mtx and /playback"]
+    MTX["MediaMTX relay<br/>RTSP in (TCP, on-demand)<br/>cam_&lt;id&gt; · cam_&lt;id&gt;_h264 (transcode)<br/>WHEP + HLS out · fMP4 recording + playback"]
+    API["FastAPI (single process)<br/>REST · WebSocket · APScheduler<br/>health poller · watchlist matcher · retention · webhooks"]
+    PG[("PostgreSQL 16 + PostGIS<br/>pg_trgm · fuzzystrmatch<br/>cameras · reads · sightings · watchlist · alerts · audit")]
+    FS[("/data volume<br/>crops · frames · snapshots · clips · reports (SHA-256)")]
+    UI["React + Ant Design SPA<br/>Registry · Map · Wall · Detections · Watchlist<br/>Alerts · Route · Reports · Health · Gap · Audit · Settings"]
+  end
+
+  subgraph GPU["ANPR worker(s) – GPU VM or CPU=1 (outbound HTTPS only)"]
+    ANPR["anpr-live (5 fps, 8–12 cameras)<br/>anpr-preindex (keyframe rate, all cameras)<br/>ffmpeg decode → plate detector (ONNX) → PaddleOCR<br/>normalise → 3 s vote → sightings · YOLOX counts"]
+  end
+
+  SB -- "RTSP/TCP (one connection per camera)" --> MTX
+  OWN -- "RTSP" --> MTX
+  DEPT -- "RTSP/TCP read-only credential" --> MTX
+  MTX -- "RTSP rtsp://mediamtx:8554/cam_&lt;id&gt;" --> ANPR
+  ANPR -- "POST /internal/detections (JSON + crop.jpg)<br/>/internal/snapshots · /internal/heartbeat" --> API
+  API -- "GET /internal/anpr-config" --> ANPR
+  API --> PG
+  API --> FS
+  API -- "GET {catalogue}/api/ingest (import)" --> SB
+  API -- "POST /v3/config/paths/add/cam_&lt;id&gt;<br/>GET /v3/paths/list (health)" --> MTX
+  CADDY -- "/api /ws /media" --> API
+  CADDY -- "/mtx (WHEP, HLS) · /playback" --> MTX
+  UI <-- "HTTPS + WSS" --> CADDY

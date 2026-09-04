@@ -1,0 +1,952 @@
+[
+ {
+  "id": 1,
+  "name": "Sachivalaya Gate 1",
+  "department": "Police",
+  "district": "Gandhinagar",
+  "type": "bullet",
+  "location": {
+   "lat": 23.2236,
+   "lon": 72.648,
+   "address": "Sachivalaya, Sector 10, Gandhinagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/1",
+  "whep_url": "http://mediamtx:8889/stream/1/whep",
+  "hls_url": "http://mediamtx:8888/stream/1/index.m3u8"
+ },
+ {
+  "id": 2,
+  "name": "Sector 11 GSRTC Bus Stand",
+  "department": "GSRTC",
+  "district": "Gandhinagar",
+  "type": "dome",
+  "location": {
+   "lat": 23.23,
+   "lon": 72.63,
+   "address": "Sector 11 GSRTC Bus Stand, Gandhinagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/2",
+  "whep_url": "http://mediamtx:8889/stream/2/whep",
+  "hls_url": "http://mediamtx:8888/stream/2/index.m3u8"
+ },
+ {
+  "id": 3,
+  "name": "Civil Hospital Gandhinagar OPD Gate",
+  "department": "Health",
+  "district": "Gandhinagar",
+  "type": "bullet",
+  "location": {
+   "lat": 23.2275,
+   "lon": 72.6485,
+   "address": "Civil Hospital Gandhinagar OPD Gate, Gandhinagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/3",
+  "whep_url": "http://mediamtx:8889/stream/3/whep",
+  "hls_url": "http://mediamtx:8888/stream/3/index.m3u8"
+ },
+ {
+  "id": 4,
+  "name": "Infocity Circle",
+  "department": "Municipal Corporation",
+  "district": "Gandhinagar",
+  "type": "ptz",
+  "location": {
+   "lat": 23.189,
+   "lon": 72.635,
+   "address": "Infocity Circle, Gandhinagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/4",
+  "whep_url": "http://mediamtx:8889/stream/4/whep",
+  "hls_url": "http://mediamtx:8888/stream/4/index.m3u8"
+ },
+ {
+  "id": 5,
+  "name": "Pethapur Gram Panchayat Chowk",
+  "department": "Panchayat",
+  "district": "Gandhinagar",
+  "type": "bullet",
+  "location": {
+   "lat": 23.267,
+   "lon": 72.652,
+   "address": "Pethapur Gram Panchayat Chowk, Gandhinagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/5",
+  "whep_url": "http://mediamtx:8889/stream/5/whep",
+  "hls_url": "http://mediamtx:8888/stream/5/index.m3u8"
+ },
+ {
+  "id": 6,
+  "name": "CH-0 Circle",
+  "department": "Police",
+  "district": "Gandhinagar",
+  "type": "anpr",
+  "location": {
+   "lat": 23.217,
+   "lon": 72.636,
+   "address": "CH-0 Circle, Gandhinagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/6",
+  "whep_url": "http://mediamtx:8889/stream/6/whep",
+  "hls_url": "http://mediamtx:8888/stream/6/index.m3u8"
+ },
+ {
+  "id": 7,
+  "name": "Mahatma Mandir Approach",
+  "department": "Municipal Corporation",
+  "district": "Gandhinagar",
+  "type": "dome",
+  "location": {
+   "lat": 23.2247,
+   "lon": 72.654,
+   "address": "Mahatma Mandir Approach, Gandhinagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/7",
+  "whep_url": "http://mediamtx:8889/stream/7/whep",
+  "hls_url": "http://mediamtx:8888/stream/7/index.m3u8"
+ },
+ {
+  "id": 8,
+  "name": "Koba Circle Highway",
+  "department": "Police",
+  "district": "Gandhinagar",
+  "type": "anpr",
+  "location": {
+   "lat": 23.165,
+   "lon": 72.655,
+   "address": "Koba Circle Highway, Gandhinagar"
+  },
+  "codec": "H265",
+  "resolution": "1280x720",
+  "fps": 10,
+  "live": true,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/8",
+  "whep_url": "http://mediamtx:8889/stream/8/whep",
+  "hls_url": "http://mediamtx:8888/stream/8/index.m3u8"
+ },
+ {
+  "id": 9,
+  "name": "Kalupur Railway Station East",
+  "department": "Police",
+  "district": "Ahmedabad",
+  "type": "bullet",
+  "location": {
+   "lat": 23.0269,
+   "lon": 72.6013,
+   "address": "Kalupur Railway Station East, Ahmedabad"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/9",
+  "whep_url": "http://mediamtx:8889/stream/9/whep",
+  "hls_url": "http://mediamtx:8888/stream/9/index.m3u8"
+ },
+ {
+  "id": 10,
+  "name": "Civil Hospital Asarwa Trauma Gate",
+  "department": "Health",
+  "district": "Ahmedabad",
+  "type": "dome",
+  "location": {
+   "lat": 23.0532,
+   "lon": 72.6067,
+   "address": "Civil Hospital Asarwa Trauma Gate, Ahmedabad"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/10",
+  "whep_url": "http://mediamtx:8889/stream/10/whep",
+  "hls_url": "http://mediamtx:8888/stream/10/index.m3u8"
+ },
+ {
+  "id": 11,
+  "name": "Gita Mandir Central Bus Station",
+  "department": "GSRTC",
+  "district": "Ahmedabad",
+  "type": "ptz",
+  "location": {
+   "lat": 23.009,
+   "lon": 72.596,
+   "address": "Gita Mandir Central Bus Station, Ahmedabad"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/11",
+  "whep_url": "http://mediamtx:8889/stream/11/whep",
+  "hls_url": "http://mediamtx:8888/stream/11/index.m3u8"
+ },
+ {
+  "id": 12,
+  "name": "Iskcon Cross Roads SG Highway",
+  "department": "Municipal Corporation",
+  "district": "Ahmedabad",
+  "type": "anpr",
+  "location": {
+   "lat": 23.028,
+   "lon": 72.507,
+   "address": "Iskcon Cross Roads SG Highway, Ahmedabad"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/12",
+  "whep_url": "http://mediamtx:8889/stream/12/whep",
+  "hls_url": "http://mediamtx:8888/stream/12/index.m3u8"
+ },
+ {
+  "id": 13,
+  "name": "Sabarmati Riverfront Ellis Bridge",
+  "department": "Municipal Corporation",
+  "district": "Ahmedabad",
+  "type": "ptz",
+  "location": {
+   "lat": 23.0225,
+   "lon": 72.5745,
+   "address": "Sabarmati Riverfront Ellis Bridge, Ahmedabad"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/13",
+  "whep_url": "http://mediamtx:8889/stream/13/whep",
+  "hls_url": "http://mediamtx:8888/stream/13/index.m3u8"
+ },
+ {
+  "id": 14,
+  "name": "Narol Circle",
+  "department": "Police",
+  "district": "Ahmedabad",
+  "type": "anpr",
+  "location": {
+   "lat": 22.966,
+   "lon": 72.616,
+   "address": "Narol Circle, Ahmedabad"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/14",
+  "whep_url": "http://mediamtx:8889/stream/14/whep",
+  "hls_url": "http://mediamtx:8888/stream/14/index.m3u8"
+ },
+ {
+  "id": 15,
+  "name": "Vastral Gram Panchayat Road",
+  "department": "Panchayat",
+  "district": "Ahmedabad",
+  "type": "bullet",
+  "location": {
+   "lat": 23.006,
+   "lon": 72.663,
+   "address": "Vastral Gram Panchayat Road, Ahmedabad"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/15",
+  "whep_url": "http://mediamtx:8889/stream/15/whep",
+  "hls_url": "http://mediamtx:8888/stream/15/index.m3u8"
+ },
+ {
+  "id": 16,
+  "name": "Pakwan Cross Roads SG Highway",
+  "department": "Police",
+  "district": "Ahmedabad",
+  "type": "anpr",
+  "location": {
+   "lat": 23.047,
+   "lon": 72.515,
+   "address": "Pakwan Cross Roads SG Highway, Ahmedabad"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/16",
+  "whep_url": "http://mediamtx:8889/stream/16/whep",
+  "hls_url": "http://mediamtx:8888/stream/16/index.m3u8"
+ },
+ {
+  "id": 17,
+  "name": "Airport Road Hansol",
+  "department": "Police",
+  "district": "Ahmedabad",
+  "type": "bullet",
+  "location": {
+   "lat": 23.074,
+   "lon": 72.63,
+   "address": "Airport Road Hansol, Ahmedabad"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/17",
+  "whep_url": "http://mediamtx:8889/stream/17/whep",
+  "hls_url": "http://mediamtx:8888/stream/17/index.m3u8"
+ },
+ {
+  "id": 18,
+  "name": "Lal Darwaja AMTS Terminus",
+  "department": "Municipal Corporation",
+  "district": "Ahmedabad",
+  "type": "dome",
+  "location": {
+   "lat": 23.025,
+   "lon": 72.582,
+   "address": "Lal Darwaja AMTS Terminus, Ahmedabad"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/18",
+  "whep_url": "http://mediamtx:8889/stream/18/whep",
+  "hls_url": "http://mediamtx:8888/stream/18/index.m3u8"
+ },
+ {
+  "id": 19,
+  "name": "Vadodara Railway Station Circle",
+  "department": "Police",
+  "district": "Vadodara",
+  "type": "anpr",
+  "location": {
+   "lat": 22.3103,
+   "lon": 73.1815,
+   "address": "Vadodara Railway Station Circle, Vadodara"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/19",
+  "whep_url": "http://mediamtx:8889/stream/19/whep",
+  "hls_url": "http://mediamtx:8888/stream/19/index.m3u8"
+ },
+ {
+  "id": 20,
+  "name": "SSG Hospital Emergency Gate",
+  "department": "Health",
+  "district": "Vadodara",
+  "type": "dome",
+  "location": {
+   "lat": 22.3086,
+   "lon": 73.1898,
+   "address": "SSG Hospital Emergency Gate, Vadodara"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/20",
+  "whep_url": "http://mediamtx:8889/stream/20/whep",
+  "hls_url": "http://mediamtx:8888/stream/20/index.m3u8"
+ },
+ {
+  "id": 21,
+  "name": "Vadodara Central Bus Stand",
+  "department": "GSRTC",
+  "district": "Vadodara",
+  "type": "ptz",
+  "location": {
+   "lat": 22.3125,
+   "lon": 73.1795,
+   "address": "Vadodara Central Bus Stand, Vadodara"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/21",
+  "whep_url": "http://mediamtx:8889/stream/21/whep",
+  "hls_url": "http://mediamtx:8888/stream/21/index.m3u8"
+ },
+ {
+  "id": 22,
+  "name": "Alkapuri Circle",
+  "department": "Municipal Corporation",
+  "district": "Vadodara",
+  "type": "bullet",
+  "location": {
+   "lat": 22.3105,
+   "lon": 73.169,
+   "address": "Alkapuri Circle, Vadodara"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/22",
+  "whep_url": "http://mediamtx:8889/stream/22/whep",
+  "hls_url": "http://mediamtx:8888/stream/22/index.m3u8"
+ },
+ {
+  "id": 23,
+  "name": "Makarpura GIDC Gate",
+  "department": "Panchayat",
+  "district": "Vadodara",
+  "type": "bullet",
+  "location": {
+   "lat": 22.254,
+   "lon": 73.188,
+   "address": "Makarpura GIDC Gate, Vadodara"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/23",
+  "whep_url": "http://mediamtx:8889/stream/23/whep",
+  "hls_url": "http://mediamtx:8888/stream/23/index.m3u8"
+ },
+ {
+  "id": 24,
+  "name": "Akota Stadium Road",
+  "department": "Municipal Corporation",
+  "district": "Vadodara",
+  "type": "dome",
+  "location": {
+   "lat": 22.296,
+   "lon": 73.165,
+   "address": "Akota Stadium Road, Vadodara"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/24",
+  "whep_url": "http://mediamtx:8889/stream/24/whep",
+  "hls_url": "http://mediamtx:8888/stream/24/index.m3u8"
+ },
+ {
+  "id": 25,
+  "name": "Surat Railway Station Approach",
+  "department": "Police",
+  "district": "Surat",
+  "type": "anpr",
+  "location": {
+   "lat": 21.2049,
+   "lon": 72.8411,
+   "address": "Surat Railway Station Approach, Surat"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/25",
+  "whep_url": "http://mediamtx:8889/stream/25/whep",
+  "hls_url": "http://mediamtx:8888/stream/25/index.m3u8"
+ },
+ {
+  "id": 26,
+  "name": "New Civil Hospital Majura Gate",
+  "department": "Health",
+  "district": "Surat",
+  "type": "dome",
+  "location": {
+   "lat": 21.182,
+   "lon": 72.8207,
+   "address": "New Civil Hospital Majura Gate, Surat"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/26",
+  "whep_url": "http://mediamtx:8889/stream/26/whep",
+  "hls_url": "http://mediamtx:8888/stream/26/index.m3u8"
+ },
+ {
+  "id": 27,
+  "name": "Surat Central Bus Station",
+  "department": "GSRTC",
+  "district": "Surat",
+  "type": "ptz",
+  "location": {
+   "lat": 21.202,
+   "lon": 72.838,
+   "address": "Surat Central Bus Station, Surat"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/27",
+  "whep_url": "http://mediamtx:8889/stream/27/whep",
+  "hls_url": "http://mediamtx:8888/stream/27/index.m3u8"
+ },
+ {
+  "id": 28,
+  "name": "Athwa Gate Circle",
+  "department": "Municipal Corporation",
+  "district": "Surat",
+  "type": "anpr",
+  "location": {
+   "lat": 21.179,
+   "lon": 72.8112,
+   "address": "Athwa Gate Circle, Surat"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/28",
+  "whep_url": "http://mediamtx:8889/stream/28/whep",
+  "hls_url": "http://mediamtx:8888/stream/28/index.m3u8"
+ },
+ {
+  "id": 29,
+  "name": "Udhna Darwaja",
+  "department": "Police",
+  "district": "Surat",
+  "type": "bullet",
+  "location": {
+   "lat": 21.183,
+   "lon": 72.838,
+   "address": "Udhna Darwaja, Surat"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/29",
+  "whep_url": "http://mediamtx:8889/stream/29/whep",
+  "hls_url": "http://mediamtx:8888/stream/29/index.m3u8"
+ },
+ {
+  "id": 30,
+  "name": "Hazira Road Ichchhapore",
+  "department": "Panchayat",
+  "district": "Surat",
+  "type": "bullet",
+  "location": {
+   "lat": 21.16,
+   "lon": 72.71,
+   "address": "Hazira Road Ichchhapore, Surat"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/30",
+  "whep_url": "http://mediamtx:8889/stream/30/whep",
+  "hls_url": "http://mediamtx:8888/stream/30/index.m3u8"
+ },
+ {
+  "id": 31,
+  "name": "Rajkot Junction Forecourt",
+  "department": "Police",
+  "district": "Rajkot",
+  "type": "anpr",
+  "location": {
+   "lat": 22.3095,
+   "lon": 70.7949,
+   "address": "Rajkot Junction Forecourt, Rajkot"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/31",
+  "whep_url": "http://mediamtx:8889/stream/31/whep",
+  "hls_url": "http://mediamtx:8888/stream/31/index.m3u8"
+ },
+ {
+  "id": 32,
+  "name": "PDU Civil Hospital Rajkot",
+  "department": "Health",
+  "district": "Rajkot",
+  "type": "dome",
+  "location": {
+   "lat": 22.2988,
+   "lon": 70.7929,
+   "address": "PDU Civil Hospital Rajkot, Rajkot"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/32",
+  "whep_url": "http://mediamtx:8889/stream/32/whep",
+  "hls_url": "http://mediamtx:8888/stream/32/index.m3u8"
+ },
+ {
+  "id": 33,
+  "name": "Rajkot ST Bus Stand",
+  "department": "GSRTC",
+  "district": "Rajkot",
+  "type": "ptz",
+  "location": {
+   "lat": 22.294,
+   "lon": 70.798,
+   "address": "Rajkot ST Bus Stand, Rajkot"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/33",
+  "whep_url": "http://mediamtx:8889/stream/33/whep",
+  "hls_url": "http://mediamtx:8888/stream/33/index.m3u8"
+ },
+ {
+  "id": 34,
+  "name": "Trikon Baug",
+  "department": "Municipal Corporation",
+  "district": "Rajkot",
+  "type": "bullet",
+  "location": {
+   "lat": 22.2975,
+   "lon": 70.799,
+   "address": "Trikon Baug, Rajkot"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/34",
+  "whep_url": "http://mediamtx:8889/stream/34/whep",
+  "hls_url": "http://mediamtx:8888/stream/34/index.m3u8"
+ },
+ {
+  "id": 35,
+  "name": "Kalawad Road Panchayat Nagar",
+  "department": "Panchayat",
+  "district": "Rajkot",
+  "type": "bullet",
+  "location": {
+   "lat": 22.29,
+   "lon": 70.76,
+   "address": "Kalawad Road Panchayat Nagar, Rajkot"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/35",
+  "whep_url": "http://mediamtx:8889/stream/35/whep",
+  "hls_url": "http://mediamtx:8888/stream/35/index.m3u8"
+ },
+ {
+  "id": 36,
+  "name": "Gondal Road Chowkdi",
+  "department": "Police",
+  "district": "Rajkot",
+  "type": "anpr",
+  "location": {
+   "lat": 22.27,
+   "lon": 70.8,
+   "address": "Gondal Road Chowkdi, Rajkot"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/36",
+  "whep_url": "http://mediamtx:8889/stream/36/whep",
+  "hls_url": "http://mediamtx:8888/stream/36/index.m3u8"
+ },
+ {
+  "id": 37,
+  "name": "Vapi GIDC Checkpost",
+  "department": "Police",
+  "district": "Valsad",
+  "type": "anpr",
+  "location": {
+   "lat": 20.3893,
+   "lon": 72.9106,
+   "address": "Vapi GIDC Checkpost, Valsad"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/37",
+  "whep_url": "http://mediamtx:8889/stream/37/whep",
+  "hls_url": "http://mediamtx:8888/stream/37/index.m3u8"
+ },
+ {
+  "id": 38,
+  "name": "Valsad Civil Hospital",
+  "department": "Health",
+  "district": "Valsad",
+  "type": "dome",
+  "location": {
+   "lat": 20.6097,
+   "lon": 72.9342,
+   "address": "Valsad Civil Hospital, Valsad"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/38",
+  "whep_url": "http://mediamtx:8889/stream/38/whep",
+  "hls_url": "http://mediamtx:8888/stream/38/index.m3u8"
+ },
+ {
+  "id": 39,
+  "name": "Bhilad Border Checkpost",
+  "department": "Police",
+  "district": "Valsad",
+  "type": "analog",
+  "location": {
+   "lat": 20.2617,
+   "lon": 72.9147,
+   "address": "Bhilad Border Checkpost, Valsad"
+  },
+  "codec": "H264",
+  "resolution": "704x576",
+  "fps": 12,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/39",
+  "whep_url": "http://mediamtx:8889/stream/39/whep",
+  "hls_url": "http://mediamtx:8888/stream/39/index.m3u8"
+ },
+ {
+  "id": 40,
+  "name": "Dahod Bus Stand",
+  "department": "GSRTC",
+  "district": "Dahod",
+  "type": "bullet",
+  "location": {
+   "lat": 22.8347,
+   "lon": 74.2555,
+   "address": "Dahod Bus Stand, Dahod"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/40",
+  "whep_url": "http://mediamtx:8889/stream/40/whep",
+  "hls_url": "http://mediamtx:8888/stream/40/index.m3u8"
+ },
+ {
+  "id": 41,
+  "name": "Zalod Gram Panchayat",
+  "department": "Panchayat",
+  "district": "Dahod",
+  "type": "analog",
+  "location": {
+   "lat": 23.1005,
+   "lon": 74.1685,
+   "address": "Zalod Gram Panchayat, Dahod"
+  },
+  "codec": "H264",
+  "resolution": "704x576",
+  "fps": 12,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/41",
+  "whep_url": "http://mediamtx:8889/stream/41/whep",
+  "hls_url": "http://mediamtx:8888/stream/41/index.m3u8"
+ },
+ {
+  "id": 42,
+  "name": "Limkheda NH-47 Checkpost",
+  "department": "Police",
+  "district": "Dahod",
+  "type": "anpr",
+  "location": {
+   "lat": 22.8176,
+   "lon": 73.9773,
+   "address": "Limkheda NH-47 Checkpost, Dahod"
+  },
+  "codec": "H265",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/42",
+  "whep_url": "http://mediamtx:8889/stream/42/whep",
+  "hls_url": "http://mediamtx:8888/stream/42/index.m3u8"
+ },
+ {
+  "id": 43,
+  "name": "Somnath Temple Road",
+  "department": "Police",
+  "district": "Gir Somnath",
+  "type": "ptz",
+  "location": {
+   "lat": 20.888,
+   "lon": 70.4013,
+   "address": "Somnath Temple Road, Gir Somnath"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/43",
+  "whep_url": "http://mediamtx:8889/stream/43/whep",
+  "hls_url": "http://mediamtx:8888/stream/43/index.m3u8"
+ },
+ {
+  "id": 44,
+  "name": "Veraval GSRTC Depot",
+  "department": "GSRTC",
+  "district": "Gir Somnath",
+  "type": "bullet",
+  "location": {
+   "lat": 20.9077,
+   "lon": 70.3665,
+   "address": "Veraval GSRTC Depot, Gir Somnath"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/44",
+  "whep_url": "http://mediamtx:8889/stream/44/whep",
+  "hls_url": "http://mediamtx:8888/stream/44/index.m3u8"
+ },
+ {
+  "id": 45,
+  "name": "Veraval Civil Hospital",
+  "department": "Health",
+  "district": "Gir Somnath",
+  "type": "analog",
+  "location": {
+   "lat": 20.91,
+   "lon": 70.37,
+   "address": "Veraval Civil Hospital, Gir Somnath"
+  },
+  "codec": "H264",
+  "resolution": "704x576",
+  "fps": 12,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/45",
+  "whep_url": "http://mediamtx:8889/stream/45/whep",
+  "hls_url": "http://mediamtx:8888/stream/45/index.m3u8"
+ },
+ {
+  "id": 46,
+  "name": "GG Hospital Jamnagar",
+  "department": "Health",
+  "district": "Jamnagar",
+  "type": "dome",
+  "location": {
+   "lat": 22.4707,
+   "lon": 70.0577,
+   "address": "GG Hospital Jamnagar, Jamnagar"
+  },
+  "codec": "H265",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/46",
+  "whep_url": "http://mediamtx:8889/stream/46/whep",
+  "hls_url": "http://mediamtx:8888/stream/46/index.m3u8"
+ },
+ {
+  "id": 47,
+  "name": "Bedi Port Road Checkpost",
+  "department": "Police",
+  "district": "Jamnagar",
+  "type": "anpr",
+  "location": {
+   "lat": 22.5,
+   "lon": 70.05,
+   "address": "Bedi Port Road Checkpost, Jamnagar"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/47",
+  "whep_url": "http://mediamtx:8889/stream/47/whep",
+  "hls_url": "http://mediamtx:8888/stream/47/index.m3u8"
+ },
+ {
+  "id": 48,
+  "name": "Lalpur Gram Panchayat",
+  "department": "Panchayat",
+  "district": "Jamnagar",
+  "type": "analog",
+  "location": {
+   "lat": 22.19,
+   "lon": 70.03,
+   "address": "Lalpur Gram Panchayat, Jamnagar"
+  },
+  "codec": "H264",
+  "resolution": "704x576",
+  "fps": 12,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/48",
+  "whep_url": "http://mediamtx:8889/stream/48/whep",
+  "hls_url": "http://mediamtx:8888/stream/48/index.m3u8"
+ },
+ {
+  "id": 49,
+  "name": "Dwarka Temple Gate",
+  "department": "Police",
+  "district": "Devbhumi Dwarka",
+  "type": "ptz",
+  "location": {
+   "lat": 22.2376,
+   "lon": 68.9674,
+   "address": "Dwarka Temple Gate, Devbhumi Dwarka"
+  },
+  "codec": "H264",
+  "resolution": "1920x1080",
+  "fps": 25,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/49",
+  "whep_url": "http://mediamtx:8889/stream/49/whep",
+  "hls_url": "http://mediamtx:8888/stream/49/index.m3u8"
+ },
+ {
+  "id": 50,
+  "name": "Khambhaliya GSRTC Depot",
+  "department": "GSRTC",
+  "district": "Devbhumi Dwarka",
+  "type": "bullet",
+  "location": {
+   "lat": 22.2095,
+   "lon": 69.6519,
+   "address": "Khambhaliya GSRTC Depot, Devbhumi Dwarka"
+  },
+  "codec": "H264",
+  "resolution": "1280x720",
+  "fps": 15,
+  "live": false,
+  "rtsp_url": "rtsp://mediamtx:8554/stream/50",
+  "whep_url": "http://mediamtx:8889/stream/50/whep",
+  "hls_url": "http://mediamtx:8888/stream/50/index.m3u8"
+ }
+]
