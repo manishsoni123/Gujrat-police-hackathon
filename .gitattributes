@@ -1,0 +1,28 @@
+# Line endings: the repository stores LF; scripts, Dockerfiles, YAML and the
+# Makefile must stay LF on a Windows checkout too (core.autocrlf=true would
+# otherwise turn deploy/*.sh into CRLF and `bash deploy/reset-db.sh` breaks).
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.csv text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+Caddyfile text eol=lf
+.env.example text eol=lf
+*.png binary
+*.jpg binary
+*.svg text eol=lf
+*.mp4 binary
+*.wav binary
+*.onnx binary
+*.pdf binary
+*.pptx binary
