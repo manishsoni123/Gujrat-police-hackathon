@@ -6,6 +6,14 @@ window (``ANPR_VOTE_WINDOW_S``, default 3 s) expires the bucket emits **one** ``
 the position-wise majority string (over the members of the majority length), the mean
 confidence, and the bbox / crop / frame of the highest-confidence member.
 
+``plate_raw`` of the emitted read is **consistent with the vote**: it is the raw OCR string of the
+highest-confidence member whose own normalisation equals the voted ``plate_norm`` (falling back to
+the display form of the voted string). The API re-normalises ``plate_raw`` and trusts that over the
+worker's ``plate_norm`` (CONTRACT section 7.2), so a raw string taken blindly from the best member -
+which may be exactly the mis-read the vote corrected - silently undid the correction (Amendments,
+2026-09-05 anpr). Invariant, asserted in ``tests/test_voting.py``:
+``normalise(read.plate_raw).plate_norm == read.plate_norm``.
+
 Only voted reads are posted to the API - never per-frame reads.
 """
 from __future__ import annotations
@@ -18,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from anpr.normalise import levenshtein, normalise
+from anpr.normalise import format_plate, levenshtein, normalise
 
 log = logging.getLogger("anpr.voting")
 
@@ -97,6 +105,29 @@ class _Bucket:
             cand.frame = None
 
 
+def raw_for_vote(plate_norm: str, members: list[Candidate]) -> str:
+    """The ``plate_raw`` to report for a voted ``plate_norm``.
+
+    Preference order, the first whose normalisation reproduces ``plate_norm``:
+
+    1. the raw OCR string of the highest-confidence member that normalised to ``plate_norm``
+       (real OCR output, keeps the ``GJ 01 AB 1234`` spacing the reader produced);
+    2. ``format_plate(plate_norm)`` - the display form, when no member agrees with the vote
+       (possible with ``max_distance > 1`` or when ``normalise`` rewrote the majority string);
+    3. ``plate_norm`` itself.
+    """
+    agreeing = [m for m in members if m.plate_norm == plate_norm]
+    candidates: list[str] = []
+    if agreeing:
+        candidates.append(max(agreeing, key=lambda m: m.confidence).plate_raw)
+    candidates.append(format_plate(plate_norm))
+    candidates.append(plate_norm)
+    for raw in candidates:
+        if raw and normalise(raw).plate_norm == plate_norm:
+            return raw
+    return candidates[-1]
+
+
 def majority_string(strings: list[str], weights: list[float] | None = None) -> str:
     """Position-wise majority over the members of the most common length.
 
@@ -163,13 +194,17 @@ class Voter:
         norm = normalise(voted)
         plate_norm = norm.plate_norm or voted
         mean_conf = float(sum(weights) / len(weights))
-        best = bucket.best
+        best = bucket.best                                      # bbox / crop / frame / time: best member
+        plate_raw = raw_for_vote(plate_norm, bucket.members)    # raw string: a member that agrees with the vote
+        if plate_raw != best.plate_raw:
+            log.debug("camera %s: vote %s overrides best member %r (%.2f); plate_raw=%r",
+                      bucket.camera_id, plate_norm, best.plate_raw, best.confidence, plate_raw)
         return VotedRead(
             camera_id=bucket.camera_id,
             captured_at=best.captured_at,
             stream_pts=best.stream_pts,
             frame_index=best.frame_index,
-            plate_raw=best.plate_raw,
+            plate_raw=plate_raw,
             plate_norm=plate_norm,
             is_valid_format=norm.is_valid_format,
             confidence=mean_conf,

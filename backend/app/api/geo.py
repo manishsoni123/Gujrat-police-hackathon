@@ -47,6 +47,7 @@ async def geo_cameras(user: CurrentUser, db: DbDep, department_id: int | None = 
                 "district": c.district, "police_station": c.police_station, "type": c.type, "ownership": c.ownership, "status": c.status,
                 "maintenance_status": c.maintenance_status, "anpr_enabled": c.anpr_enabled, "live": c.live, "codec": c.codec,
                 "heading_deg": c.heading_deg, "fov_deg": c.fov_deg, "last_seen_at": iso_z(c.last_seen_at),
+                "location_confidence": c.location_confidence,
             },
         })
     return {"type": "FeatureCollection", "features": feats}

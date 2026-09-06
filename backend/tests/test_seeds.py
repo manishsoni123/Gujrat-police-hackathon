@@ -38,7 +38,7 @@ def test_users_seed(seeds_dir: Path) -> None:
 
 def test_watchlist_seed(seeds_dir: Path) -> None:
     rows = _rows(seeds_dir / "watchlist_seed.csv")
-    assert len(rows) == 23
+    assert len(rows) == 20
     plates = [normalise(r["plate"]).plate_norm for r in rows if r["entity_type"] == "vehicle"]
     # §12.2: the anchor plates lead the file; 22BH4321AA is an ANPR-only anchor (BH normalisation) and is not watchlisted
     assert plates[0] == "GJ01AB1234"
@@ -56,6 +56,15 @@ def test_watchlist_seed(seeds_dir: Path) -> None:
     assert active_critical_anchors == ["GJ01AB1234"]
     assert by_plate["GJ18CD5678"]["is_active"] == "false"
     assert sum(1 for r in rows if r["entity_type"] == "person") == 3
+    # seed rev 3: rows 7+ are plates actually read on the organiser cameras (government feed, 5 Sept 2026);
+    # every one of them names its camera and source in the notes and none collides with a retired filler
+    from app.seed import RETIRED_FILLER_PLATES
+
+    real = [r for r in rows[6:] if r["entity_type"] == "vehicle"]
+    assert len(real) == 11 and all("Government feed" in r["notes"] and "cam07" in r["notes"] for r in real)
+    assert all(r["is_active"] != "false" for r in real)
+    assert not set(plates) & set(RETIRED_FILLER_PLATES)
+    assert len({r["reason"] for r in real}) >= 4 and len({r["priority"] for r in real}) >= 3
 
 
 def test_pois_seed(seeds_dir: Path) -> None:

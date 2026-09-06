@@ -26,6 +26,8 @@ ROUTE_ACTIONS: list[tuple[str, str, str]] = [
     ("POST", "/api/api-keys", "apikey.create"),
     ("DELETE", "/api/api-keys/{id}", "apikey.delete"),
     ("POST", "/api/cameras/import/sandbox", "camera.import_sandbox"),
+    ("POST", "/api/cameras/import/sandbox/file", "camera.import_sandbox"),
+    ("POST", "/api/settings/catalogue/enrichment", "settings.update"),
     ("POST", "/api/cameras/import/csv", "camera.import_csv"),
     ("POST", "/api/v1/cameras/bulk", "camera.import_bulk"),
     ("POST", "/api/cameras", "camera.create"),

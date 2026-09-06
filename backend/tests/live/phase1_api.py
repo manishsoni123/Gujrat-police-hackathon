@@ -237,7 +237,7 @@ async def main():
         r = await c.get("/api/settings/public", headers=VT); check("settings public", r.status_code == 200 and r.json()["mock_sandbox"] is True and "route.speed_flag_kmh" in r.json())
 
         # webhooks + sink
-        r = await c.post("/api/webhooks", json={"name": "sink", "url": "http://localhost:8000/api/mock-sandbox/webhook-sink", "secret": "s3cret", "event_types": ["alert.created", "alert.updated"]}, headers=A); check("webhook create", r.status_code == 201 and r.json()["secret"] == "********", r.text[:150])
+        r = await c.post("/api/webhooks", json={"name": "sink", "url": "http://localhost:8000/mock-sandbox/webhook-sink", "secret": "s3cret", "event_types": ["alert.created", "alert.updated"]}, headers=A); check("webhook create", r.status_code == 201 and r.json()["secret"] == "********", r.text[:150])
         whid = r.json()["id"]
         r = await c.post(f"/api/webhooks/{whid}/test", headers=A); check("webhook test 204", r.status_code == 200 and r.json()["status"] == 204, r.text)
         # trigger alert on camera 6 for a different plate → webhook delivery

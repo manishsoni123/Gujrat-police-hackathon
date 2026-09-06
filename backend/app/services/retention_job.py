@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.hashing import abs_path, data_root
 from app.core.tz import utcnow
-from app.db.models import CameraHealthLog, Clip, ObjectCount, PlateRead, ReportFile, Sighting
+from app.db.models import AnprWorker, CameraHealthLog, Clip, ObjectCount, PlateRead, ReportFile, Sighting
 from app.db.session import SessionLocal
 from app.services import settings_service as cfg
 from app.services.audit import write_audit
@@ -35,7 +35,7 @@ def _unlink(rel: str | None, counts: dict[str, Any]) -> None:
 
 
 async def run_retention(dry_run: bool = False) -> dict[str, Any]:
-    counts: dict[str, Any] = {"reads": 0, "crops": 0, "frames": 0, "health_log": 0, "object_counts": 0, "clips": 0, "reports": 0, "bytes_freed": 0, "dry_run": dry_run}
+    counts: dict[str, Any] = {"reads": 0, "crops": 0, "frames": 0, "health_log": 0, "object_counts": 0, "clips": 0, "reports": 0, "anpr_workers": 0, "bytes_freed": 0, "dry_run": dry_run}
     now = utcnow()
     reads_before = now - timedelta(days=cfg.get_int("retention.days_reads"))
     frames_before = now - timedelta(days=cfg.get_int("retention.days_frames"))
@@ -47,6 +47,8 @@ async def run_retention(dry_run: bool = False) -> dict[str, Any]:
         await _purge_rows(db, ObjectCount, ObjectCount.minute, now - timedelta(days=90), "object_counts", counts, dry_run)
         await _purge_files(db, Clip, Clip.created_at, Clip.path, clips_before, "clips", counts, dry_run)
         await _purge_files(db, ReportFile, ReportFile.created_at, ReportFile.path, clips_before, "reports", counts, dry_run)
+        # a worker started without WORKER_ID gets a random id (§7.5): rows silent for 24 h are dead, not stale
+        await _purge_rows(db, AnprWorker, AnprWorker.last_heartbeat_at, now - timedelta(hours=24), "anpr_workers", counts, dry_run)
         if not dry_run:
             await db.commit()
     if not dry_run:

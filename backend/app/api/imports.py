@@ -25,16 +25,40 @@ from app.services.mediamtx_client import client as mtx
 from app.services.mediamtx_client import play_path
 from app.services.report_builder import store_report
 from app.services.sandbox_catalogue import CatalogueError
+from app.services.sentinel_import import audit_summary, run_sentinel_import
 
 log = logging.getLogger("sentinel.import")
 router = APIRouter(tags=["imports"])
 
 MAX_CSV_BYTES = 200 * 1024 * 1024
+MAX_CATALOGUE_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+def _truthy(v: str | bool | None, default: bool) -> bool:
+    if v is None or v == "":
+        return default
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("true", "1", "yes", "on")
+
+
+async def _sentinel_import(request: Request, db: DbDep, *, cameras_json: bytes | None, enrichment_csv: str | None, dry_run: bool, measure_first: bool, probe: bool):
+    try:
+        summary = await run_sentinel_import(db, cameras_json=cameras_json, enrichment_csv=enrichment_csv, dry_run=dry_run, measure_first=measure_first, probe=probe)
+    except CatalogueError as exc:
+        set_audit(request, entity="catalogue", after={"source": "sentinel_portal", "error": str(exc)})
+        raise upstream_error(str(exc))
+    set_audit(request, entity="catalogue", after=audit_summary(summary))
+    return summary
 
 
 @router.post("/cameras/import/sandbox", dependencies=[Depends(require_permission("cameras.write")), Depends(require_role("admin"))])
 async def import_sandbox(user: CurrentUser, db: DbDep, request: Request, body: SandboxImportRequest | None = None):
+    """Catalogue import. `catalogue.source = sentinel_portal` → organiser sandbox (portal login or the last
+    uploaded / server-side cameras.json + enrichment CSV + probes); `mock` / `generic_json` → `{base_url}/api/ingest`."""
     body = body or SandboxImportRequest()
+    if cfg.get("catalogue.source") == "sentinel_portal":
+        return await _sentinel_import(request, db, cameras_json=None, enrichment_csv=None, dry_run=body.dry_run, measure_first=body.measure_first_stream, probe=body.probe)
     started = utcnow()
     adapter = SandboxCatalogueAdapter()
     try:
@@ -59,7 +83,7 @@ async def import_sandbox(user: CurrentUser, db: DbDep, request: Request, body: S
 
             first_live = (await db.execute(select(Camera).where(Camera.source == "sandbox", Camera.live.is_(True), Camera.rtsp_url.isnot(None)).order_by(Camera.id).limit(1))).scalar_one_or_none()
         if first_live is not None:
-            path = play_path(first_live.id, first_live.codec)
+            path = play_path(first_live.id, first_live.codec, getattr(first_live, "meta", None))
             t_first = time.perf_counter()
             await mtx.trigger_hls(path)  # blocks until the HLS muxer has data (the on-demand pull itself)
             elapsed = await mtx.wait_ready(path, timeout_s=15.0)
@@ -85,6 +109,46 @@ async def import_sandbox(user: CurrentUser, db: DbDep, request: Request, body: S
     }
     set_audit(request, entity="catalogue", after={k: v for k, v in summary.items() if k not in ("errors", "warnings")} | {"errors": len(summary["errors"]), "warnings": len(summary["warnings"])})
     return summary
+
+
+@router.post("/cameras/import/sandbox/file", dependencies=[Depends(require_permission("cameras.write")), Depends(require_role("admin"))])
+async def import_sandbox_file(
+    user: CurrentUser,
+    db: DbDep,
+    request: Request,
+    cameras_json: UploadFile | None = File(None),
+    enrichment_csv: UploadFile | None = File(None),
+    dry_run: str = Form("false"),
+    measure_first_stream: str = Form("true"),
+    probe: str = Form("true"),
+):
+    """Organiser-sandbox import with an uploaded `cameras.json` (the portal catalogue needs a browser session, so the
+    saved copy is the primary path) and optionally an enrichment CSV. Both files are kept under `DATA_DIR/catalogue/`
+    as the "last uploaded" fallback. Works regardless of `catalogue.source`."""
+    cam_bytes: bytes | None = None
+    enr_text: str | None = None
+    if cameras_json is not None and cameras_json.filename:
+        cam_bytes = await cameras_json.read()
+        if len(cam_bytes) > MAX_CATALOGUE_UPLOAD_BYTES:
+            raise ApiError(413, "cameras.json larger than 5 MB")
+        if not cam_bytes.strip():
+            cam_bytes = None
+    if enrichment_csv is not None and enrichment_csv.filename:
+        raw = await enrichment_csv.read()
+        if len(raw) > MAX_CATALOGUE_UPLOAD_BYTES:
+            raise ApiError(413, "enrichment CSV larger than 5 MB")
+        if raw.strip():
+            enr_text = decode_csv_bytes(raw)
+            from app.adapters.sentinel_portal import UPLOADED_ENRICHMENT_CSV, save_upload
+
+            try:
+                save_upload(UPLOADED_ENRICHMENT_CSV, raw)
+            except OSError:
+                log.warning("could not keep the uploaded enrichment CSV")
+    return await _sentinel_import(
+        request, db, cameras_json=cam_bytes, enrichment_csv=enr_text,
+        dry_run=_truthy(dry_run, False), measure_first=_truthy(measure_first_stream, True), probe=_truthy(probe, True),
+    )
 
 
 @router.post("/cameras/import/csv", dependencies=[Depends(require_permission("cameras.write"))])

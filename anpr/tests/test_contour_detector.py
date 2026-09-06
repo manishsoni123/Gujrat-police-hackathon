@@ -63,7 +63,7 @@ def test_build_detector_contour_and_missing_onnx(tmp_path):
     det = build_detector("contour", str(tmp_path / "missing.onnx"), conf=0.4, min_w=60, cpu=True)
     assert det.name == "contour"
     assert detector_status(det, "contour") == {
-        "requested": "contour", "active": "contour", "degraded": False, "providers": [], "weights": None,
+        "requested": "contour", "active": "contour", "degraded": False, "providers": [], "weights": None, "tile": 0,
     }
     auto = build_detector("auto", str(tmp_path / "missing.onnx"), conf=0.4, min_w=60, cpu=True)
     # graceful but *visible* fallback when the weights are absent

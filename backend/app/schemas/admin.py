@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import Field, field_validator
 
+from app.core.urlguard import check_outbound_url
 from app.db.models import WEBHOOK_EVENTS
 from app.schemas.common import ApiModel
 
@@ -15,6 +16,7 @@ class SettingsUpdate(ApiModel):
 
 
 class CatalogueTestRequest(ApiModel):
+    # generic_json / mock
     base_url: str | None = None
     auth_type: str | None = None
     auth_username: str | None = None
@@ -22,6 +24,18 @@ class CatalogueTestRequest(ApiModel):
     auth_header: str | None = None
     timeout_s: float | None = None
     field_map: dict[str, list[str]] | None = None
+    # sentinel_portal (organiser sandbox): every value optional, "********" = keep the stored secret
+    source: str | None = None
+    camera_id: str | None = Field(None, max_length=64)
+    stream_host: str | None = None
+    rtsp_port: int | None = Field(None, ge=1, le=65535)
+    whep_port: int | None = Field(None, ge=1, le=65535)
+    stream_email: str | None = None
+    stream_password: str | None = None
+    portal_url: str | None = None
+    portal_email: str | None = None
+    portal_password: str | None = None
+    check_portal: bool = True
 
 
 class WebhookCreate(ApiModel):
@@ -36,7 +50,7 @@ class WebhookCreate(ApiModel):
     def _url(cls, v: str) -> str:
         if not v.lower().startswith(("http://", "https://")):
             raise ValueError("must start with http:// or https://")
-        return v
+        return check_outbound_url(v)  # SSRF guard (core/urlguard.py)
 
     @field_validator("event_types")
     @classmethod
@@ -57,9 +71,11 @@ class WebhookUpdate(ApiModel):
     @field_validator("url")
     @classmethod
     def _url(cls, v: str | None) -> str | None:
-        if v is not None and not v.lower().startswith(("http://", "https://")):
+        if v is None:
+            return None
+        if not v.lower().startswith(("http://", "https://")):
             raise ValueError("must start with http:// or https://")
-        return v
+        return check_outbound_url(v)
 
     @field_validator("event_types")
     @classmethod

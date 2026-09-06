@@ -68,7 +68,16 @@ RUN python -m pip install --upgrade pip==24.2 \
     && python -m pip install --timeout 180 --retries 8 -r /app/anpr/requirements.txt "${ONNXRUNTIME_PACKAGE}" \
     && python -m pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless \
     && python -m pip install --timeout 180 --retries 8 --no-deps opencv-python-headless==4.10.0.84 \
-    && python -c "import cv2, onnxruntime, paddle, paddleocr; print('cv2', cv2.__version__, 'ort', onnxruntime.__version__, 'paddle', paddle.__version__)"
+    && python -c "import cv2, onnxruntime, paddle, paddleocr, fast_plate_ocr; print('cv2', cv2.__version__, 'ort', onnxruntime.__version__, 'paddle', paddle.__version__, 'fast_plate_ocr ok')"
+
+# The worker runs as an unprivileged user (uid 10001, like the api image's "sentinel" user): it
+# decodes untrusted RTSP bitstreams with ffmpeg/OpenCV/Paddle and carries INTERNAL_API_KEY, so a
+# decoder bug must not yield root. HOME=/app makes PaddleOCR (~/.paddleocr) and Paddle (~/.paddle,
+# ~/.cache) resolve under /app, which the user owns; nothing else is written at run time
+# (PYTHONDONTWRITEBYTECODE, no __pycache__), so the container also works with `read_only: true`
+# plus a tmpfs on /tmp (deploy/docker-compose.yml).
+ENV HOME=/app
+RUN groupadd -r -g 10001 anpr && useradd -r -u 10001 -g anpr -d /app -s /usr/sbin/nologin anpr
 
 # paddlepaddle 2.6 exports its own (older) zlib symbols from libpaddle.so, which it loads with
 # RTLD_GLOBAL. With lazy binding the system libz.so.1 then resolves its *internal* calls
@@ -80,14 +89,14 @@ ENV LD_BIND_NOW=1
 
 # PaddleOCR English models (PP-OCRv3 detection - PaddleOCR ships no v4 English det model - and
 # PP-OCRv4 recognition), fetched once at build time so the worker never downloads at run time
-# (lands in /root/.paddleocr/whl/...).
+# (lands in $HOME/.paddleocr/whl/... = /app/.paddleocr, handed to the anpr user below).
 # "import zlib" must precede the Paddle import (same zlib clash: the zlib extension has to bind
 # to libz.so.1 before libpaddle.so enters the global symbol scope).
 RUN if [ "${PADDLE_MODELS}" = "1" ]; then \
         python -c "import zlib; from paddleocr import PaddleOCR; PaddleOCR(lang='en', use_angle_cls=False, show_log=False); print('paddleocr models ready')"; \
     fi
 
-# Detector weights (ONNX); the SHA-256 ledger is anpr/weights/HASHES.txt. The build FAILS when a
+# Detector weights (ONNX) and the fast-plate-ocr recogniser models (+ their .yaml configs); the SHA-256 ledger is anpr/weights/HASHES.txt. The build FAILS when a
 # weight is missing or its hash is wrong - a green image without the plate detector would silently
 # run the contour fallback on real footage. Files already present in the build context are
 # verified; missing ones are downloaded from the upstream GitHub releases.
@@ -96,7 +105,7 @@ RUN if [ "${PADDLE_MODELS}" = "1" ]; then \
 #                                 verified, fail when missing or mismatched
 #   DOWNLOAD_WEIGHTS=none         deliberately build a contour-only image (unit tests / offline CI);
 #                                 the worker then starts DEGRADED and says so in the heartbeat
-COPY anpr/weights/ /app/weights/
+COPY --chown=anpr:anpr anpr/weights/ /app/weights/
 RUN case "${DOWNLOAD_WEIGHTS}" in \
         1)    python /app/weights/download.py --dir /app/weights --require ;; \
         0)    python /app/weights/download.py --dir /app/weights --no-download --require ;; \
@@ -106,9 +115,10 @@ RUN case "${DOWNLOAD_WEIGHTS}" in \
     esac
 
 # Worker code and helper scripts.
-COPY anpr/ /app/anpr/
-COPY scripts/ /app/scripts/
-RUN rm -rf /app/anpr/weights && ln -s /app/weights /app/anpr/weights
+COPY --chown=anpr:anpr anpr/ /app/anpr/
+COPY --chown=anpr:anpr scripts/ /app/scripts/
+RUN rm -rf /app/anpr/weights && ln -s /app/weights /app/anpr/weights \
+    && chown -R anpr:anpr /app
 
 ENV PYTHONPATH=/app \
     ANPR_MODE=live \
@@ -117,6 +127,9 @@ ENV PYTHONPATH=/app \
     ANPR_DET_MODEL=/app/weights/yolo-v9-t-384-license-plates-end2end.onnx \
     OBJECT_MODEL=/app/weights/yolox_s.onnx \
     LOG_LEVEL=INFO
+
+# Drop privileges: everything from here on (pipeline, pytest, eval tools) runs as uid 10001.
+USER anpr
 
 # The worker has no listening port; liveness is the heartbeat it posts to the API.
 CMD ["python", "-m", "anpr.pipeline"]

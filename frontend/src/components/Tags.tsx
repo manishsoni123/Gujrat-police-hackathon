@@ -9,16 +9,20 @@ import {
   ALERT_STATUS,
   AMC_STATUS,
   CAMERA_STATUS,
+  CATALOGUE_NOT_STREAMING,
   CONFIDENCE_LEVEL,
   EVENT_TYPE,
+  LOCATION_CONFIDENCE,
   MAINTENANCE_STATUS,
   WATCHLIST_REASON,
   departmentColour,
+  displayStatus,
   type AlertPriority,
   type AlertStatus,
   type AmcStatus,
   type CameraStatus,
   type ConfidenceLevel,
+  type LocationConfidence,
   type MaintenanceStatus,
   type WatchlistReason,
 } from '@/theme/colours';
@@ -61,9 +65,18 @@ export function ColourTag({ colour, label, icon, dot, pulse, size = 'default', t
   return title ? <Tooltip title={title}>{tag}</Tooltip> : tag;
 }
 
-export function StatusTag({ status, size }: { status: CameraStatus | string; size?: 'small' | 'default' }) {
-  const meta = CAMERA_STATUS[status as CameraStatus] ?? { colour: '#9CA3AF', label: humanise(status) };
-  return <ColourTag colour={meta.colour} label={meta.label} dot pulse={status === 'online'} size={size} />;
+/**
+ * Camera status pill. Pass the catalogue `live` flag where it is known: a camera the catalogue marks
+ * live=false is shown as a grey "Not streaming (catalogue)" instead of a red "Offline".
+ */
+export function StatusTag({ status, live, size, short }: { status: CameraStatus | string; live?: boolean | null; size?: 'small' | 'default'; short?: boolean }) {
+  const st = displayStatus(status, live);
+  if (st === 'not_streaming') {
+    const label = live === false && !short ? CATALOGUE_NOT_STREAMING.label : CATALOGUE_NOT_STREAMING.shortLabel;
+    return <ColourTag colour={CATALOGUE_NOT_STREAMING.colour} label={label} dot size={size} title={CATALOGUE_NOT_STREAMING.hint} />;
+  }
+  const meta = CAMERA_STATUS[st] ?? { colour: '#9CA3AF', label: humanise(status) };
+  return <ColourTag colour={meta.colour} label={meta.label} dot pulse={st === 'online'} size={size} />;
 }
 
 export function PriorityTag({ priority, size }: { priority: AlertPriority | string; size?: 'small' | 'default' }) {
@@ -110,16 +123,36 @@ export function DepartmentTag({ code, name, size }: { code: string | null | unde
   return <ColourTag colour={c} label={code ?? 'UNASSIGNED'} title={name ?? undefined} size={size} />;
 }
 
+/** Codec enum → display label ("H264" → "H.264"), shared by CodecTag and the stream metadata rows. */
+export function codecLabel(codec: string | null | undefined): string {
+  if (!codec) return '—';
+  if (codec === 'H265') return 'H.265';
+  if (codec === 'H264') return 'H.264';
+  return codec;
+}
+
 export function CodecTag({ codec, size = 'small' }: { codec: string | null | undefined; size?: 'small' | 'default' }) {
   if (!codec) return null;
   const colour = codec === 'H265' ? '#7C3AED' : codec === 'H264' ? '#1E4DB7' : '#6B7280';
-  return <ColourTag colour={colour} label={codec === 'H265' ? 'H.265' : codec === 'H264' ? 'H.264' : codec} size={size} title={codec === 'H265' ? 'Transcoded to H.264 by the relay for browser playback' : undefined} />;
+  return <ColourTag colour={colour} label={codecLabel(codec)} size={size} title={codec === 'H265' ? 'Transcoded to H.264 by the relay for browser playback' : undefined} />;
+}
+
+/** Small red "Watchlist hit" marker used beside plates in read tables and drawers. */
+export function WatchlistHitTag({ size = 'small' }: { size?: 'small' | 'default' }) {
+  return <ColourTag colour="#DC2626" label="Watchlist hit" size={size} />;
 }
 
 export function RoleTag({ role, size = 'small' }: { role: string; size?: 'small' | 'default' }) {
   const colours: Record<string, string> = { admin: '#DC2626', dept_admin: '#7C3AED', operator: '#1E4DB7', viewer: '#6B7280' };
   const labels: Record<string, string> = { admin: 'Admin', dept_admin: 'Dept admin', operator: 'Operator', viewer: 'Viewer' };
   return <ColourTag colour={colours[role] ?? '#6B7280'} label={labels[role] ?? humanise(role)} size={size} />;
+}
+
+/** Coordinate confidence of an organiser-sandbox camera (exact / approximate / guess, all team-inferred); "n/a" when not applicable. */
+export function LocationConfidenceTag({ confidence, size = 'small' }: { confidence: LocationConfidence | string | null | undefined; size?: 'small' | 'default' }) {
+  const meta = confidence ? LOCATION_CONFIDENCE[confidence as LocationConfidence] : undefined;
+  if (!meta) return <span style={{ color: '#9CA3AF' }} title="No confidence recorded (coordinates supplied directly)">n/a</span>;
+  return <ColourTag colour={meta.colour} label={`${meta.label} (team-inferred)`} size={size} title={meta.hint} />;
 }
 
 export function BoolTag({ value, yes = 'Yes', no = 'No', size = 'small' }: { value: boolean | null | undefined; yes?: string; no?: string; size?: 'small' | 'default' }) {

@@ -39,5 +39,8 @@ async def healthz():
         "mediamtx": "ok" if mtx_ok else "down",
         "anpr_workers": workers,
         "uptime_s": int(time.monotonic() - _STARTED),
+        # true only on a public (COOKIE_SECURE/https) deployment whose seeded API keys or jury passwords are still the
+        # published defaults (names are admin-only, in /api/health/summary); the SPA shows an admin banner on it
+        "default_secrets_in_use": bool(settings.default_secrets_in_use),
     }
     return JSONResponse(status_code=200 if db_ok else 503, content=body)

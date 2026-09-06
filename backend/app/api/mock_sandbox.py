@@ -15,6 +15,10 @@ from app.core.tz import iso_z, utcnow
 from app.services import mock_catalogue
 
 router = APIRouter(tags=["mock-sandbox"])
+# The POST sink is mounted separately (main.py): open only at the API root (http://api:8000/mock-sandbox/webhook-sink,
+# unreachable through Caddy) and, under /api, only with the internal API key — nobody on the Internet can write into
+# the admin-visible "deliveries" list (CONTRACT Amendments 2026-09-05).
+sink_router = APIRouter(tags=["mock-sandbox"])
 
 _sink: deque[dict[str, Any]] = deque(maxlen=20)
 
@@ -43,7 +47,7 @@ async def mock_ingest():
     return JSONResponse(content=mock_catalogue.load())
 
 
-@router.post("/mock-sandbox/webhook-sink", status_code=204)
+@sink_router.post("/mock-sandbox/webhook-sink", status_code=204)
 async def webhook_sink(request: Request):
     _enabled()
     try:

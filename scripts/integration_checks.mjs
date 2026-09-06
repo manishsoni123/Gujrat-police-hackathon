@@ -205,17 +205,40 @@ async function phaseA() {
   const dae = await req('GET', '/api/cameras/export?format=csv', { token: da.token });
   check('dept_admin export scoped', dae.status === 200 && !dae.text.includes(',HEALTH,'), dae.text.trim().split('\n').length);
 
-  // Health poller
-  const hp = await pollUntil('health poller (online>=9, offline>=42)', async () => {
+  // Health poller. A catalogue camera that never delivered a stream (live=false) becomes `not_streaming`
+  // after HEALTH_OFFLINE_AFTER checks - never `offline`, and never with a camera_offline alert (CONTRACT
+  // amendment 2026-09-05, §4.1/§5.6). `offline` + alert is reserved for a camera that was online before.
+  const hp = await pollUntil('health poller (online>=9, not_streaming>=42)', async () => {
     const r = await req('GET', '/api/health/summary', { token: A });
     const c = r.data?.cameras ?? {};
     process.stdout.write(`  health: ${JSON.stringify(c)} mediamtx=${JSON.stringify(r.data?.mediamtx)}\n`);
-    return c.online >= 9 && c.offline >= 42 ? r.data : null;
+    return c.online >= 9 && c.not_streaming >= 42 ? r.data : null;
   }, { every: 20000, timeout: 300000 });
-  check('health poller: 8 live + own online, 42 catalogue-offline within 5 min', Boolean(hp.value), `${hp.elapsed_s} s ${JSON.stringify(hp.value?.cameras)}`);
+  check('health poller: 8 live + own online, 42 catalogue not_streaming within 5 min', Boolean(hp.value), `${hp.elapsed_s} s ${JSON.stringify(hp.value?.cameras)}`);
   meas.health_settle_s = hp.elapsed_s;
+  const down5 = hp.value?.down_over_5min;
+  const down5n = Array.isArray(down5) ? down5.length : Number(down5 ?? 0);
+  check('never-streamed cameras are not_streaming, none offline, none down_over_5min', hp.value?.cameras?.offline === 0 && down5n === 0 && (hp.value?.not_streaming ?? []).length >= 42, `offline=${hp.value?.cameras?.offline} down_over_5min=${down5n} not_streaming[]=${hp.value?.not_streaming?.length}`);
+  const allCams = (await req('GET', '/api/cameras?page_size=200', { token: A })).data?.items ?? [];
+  const neverSeen = new Set(allCams.filter((c) => !c.last_seen_at).map((c) => c.id));
+  const coAlerts = await req('GET', '/api/alerts?type=camera_offline&status=new,acknowledged,closed&page_size=200', { token: A });
+  const bogus = (coAlerts.data?.items ?? []).filter((x) => neverSeen.has(x.camera?.id));
+  check('no camera_offline alert (open or closed) for a never-online camera', coAlerts.status === 200 && bogus.length === 0, `never_seen=${neverSeen.size} camera_offline_alerts=${coAlerts.data?.total} on_never_seen=${bogus.length}`);
+  const openAll = await req('GET', '/api/alerts?status=new,acknowledged&page_size=200', { token: A });
+  check('no alert flood after import (open alerts < 20 before any ANPR read)', openAll.status === 200 && openAll.data.total < 20, `open=${openAll.data?.total}`);
   const cam3h = await req('GET', `/api/cameras/${idOf(3)}/health?hours=1`, { token: A });
-  check('camera health log has checks', cam3h.status === 200 && cam3h.data.checks > 0 && cam3h.data.log.length > 0, `checks=${cam3h.data?.checks} status=${cam3h.data?.status}`);
+  check('camera health log has checks (mock 3 is live -> online)', cam3h.status === 200 && cam3h.data.checks > 0 && cam3h.data.log.length > 0 && cam3h.data.status === 'online', `checks=${cam3h.data?.checks} status=${cam3h.data?.status}`);
+  const cam9h = await req('GET', `/api/cameras/${idOf(9)}/health?hours=1`, { token: A });
+  check('catalogue camera 9 (live=false) is not_streaming after its failed checks', cam9h.status === 200 && cam9h.data.checks >= 3 && cam9h.data.status === 'not_streaming', `checks=${cam9h.data?.checks} status=${cam9h.data?.status}`);
+
+  // Internal worker API is unreachable through Caddy (CONTRACT §1.2), even with the internal key.
+  const int1 = await req('GET', '/api/internal/anpr-config?mode=live', { key: IK });
+  const int2 = await req('POST', '/api/internal/heartbeat', { key: IK, json: { worker_id: 'x', mode: 'live' } });
+  check('/api/internal/* is 404 through Caddy even with the internal key', int1.status === 404 && int2.status === 404, `${int1.status},${int2.status}`);
+  // dept_admin may only reach HLS of cameras in its scope (forward_auth -> /auth/verify -> 404 otherwise).
+  const daOwnDept = await req('GET', `/mtx/cam_${idOf(1)}/index.m3u8`, { headers: { Cookie: `sg_session=${da.token}` } });
+  const daOther = await req('GET', `/mtx/cam_${idOf(3)}/index.m3u8`, { headers: { Cookie: `sg_session=${da.token}` } });
+  check('dept_admin HLS: own-department camera 200, other department 404', daOwnDept.status === 200 && daOwnDept.text.startsWith('#EXTM3U') && daOther.status === 404, `police cam_${idOf(1)}=${daOwnDept.status} health cam_${idOf(3)}=${daOther.status}`);
 
   // Audit
   const au = await req('GET', '/api/audit?page_size=500', { token: A });
@@ -325,6 +348,13 @@ async function phaseB() {
   const r = rt.data ?? {};
   const ordered = (r.sightings ?? []).every((s, i, arr) => i === 0 || arr[i - 1].first_seen <= s.first_seen);
   check('route ordered sightings + polyline + legs flagged', rt.status === 200 && (r.sightings ?? []).length >= 3 && ordered && r.polyline.length === r.sightings.length && (r.legs ?? []).length >= 2 && r.legs.filter((l) => l.distance_km > 0.5).every((l) => l.flags.includes('implausible_speed')) && r.total_distance_km > 0, `stops=${r.sightings?.length} cams=${r.cameras_count} km=${r.total_distance_km} loops=${r.loop_resets_in_window} seq=${r.sightings?.map((s) => s.camera?.external_id).join('>')}`);
+  // Two systems on one route: GJ01AB1234 is one of the two plates the own-gate loop shares with sandbox cameras 1-3
+  // (CONTRACT §12.4 amendment); the pre-index worker reads the own gate (Ahmedabad, ~25 km from Gandhinagar).
+  const seqExt = (r.sightings ?? []).map((s) => s.camera?.external_id);
+  const ownStops = seqExt.filter((e) => e === 'OWN-GATE-01').length;
+  const sandboxStops = seqExt.filter((e) => /^\d+$/.test(String(e))).length;
+  check('route spans two systems (own gate + sandbox cameras) with a sane total distance', ownStops >= 1 && sandboxStops >= 2 && r.total_distance_km > 1 && r.total_distance_km < 500, `own=${ownStops} sandbox=${sandboxStops} km=${r.total_distance_km} seq=${seqExt.join('>')}`);
+  meas.route_two_systems = { own_stops: ownStops, sandbox_stops: sandboxStops, total_distance_km: r.total_distance_km, cameras_count: r.cameras_count };
   const conf = await req('POST', '/api/vehicles/GJ01AB1234/confirm', { token: op.token, json: { decisions: [{ sighting_id: r.sightings[0].sighting_id, decision: 'confirmed' }] } });
   check('route confirm saved', conf.status === 200 && conf.data.saved === 1, JSON.stringify(conf.data));
   const pdf = await req('GET', '/api/vehicles/GJ01AB1234/route.pdf', { token: A, raw: true });
@@ -361,8 +391,14 @@ async function phaseB() {
     const e = await req('GET', '/api/events?type=loop_reset', { token: A });
     return (e.data?.total ?? 0) > evBefore ? e.data : null;
   }, { every: 5000, timeout: 90000 });
-  const hb = (await req('GET', '/api/health/summary', { token: A })).data?.anpr_workers?.find((x) => x.mode === 'live');
-  const restarted = (hb?.camera_states ?? []).find((c) => c.id === idOf(3));
+  // The event arrives within seconds; the `decoder_restarts` counter travels with the next heartbeat (HEARTBEAT_S,
+  // 15 s), so poll the health summary for it instead of reading it once.
+  const restartedPoll = await pollUntil('decoder_restarts >= 1 in the next heartbeat', async () => {
+    const hb = (await req('GET', '/api/health/summary', { token: A })).data?.anpr_workers?.find((x) => x.mode === 'live');
+    const cs = (hb?.camera_states ?? []).find((c) => c.id === idOf(3));
+    return (cs?.decoder_restarts ?? 0) >= 1 ? cs : null;
+  }, { every: 5000, timeout: 45000 });
+  const restarted = restartedPoll.value;
   check('discontinuity: kicked reader -> decoder restart + loop_reset event', Boolean(kick) && kick.status === 200 && Boolean(ev.value) && (ev.value.items[0].camera?.id === idOf(3)) && (restarted?.decoder_restarts ?? 0) >= 1, `kick=${kick?.status} after ${Math.round((Date.now() - tKick) / 1000)} s events=${ev.value?.total} note="${ev.value?.items?.[0]?.note}" restarts=${restarted?.decoder_restarts} state=${restarted?.state}`);
   meas.reconnect_after_kick_s = ev.value ? Math.round((Date.now() - tKick) / 1000) : null;
 
@@ -412,7 +448,10 @@ async function phaseB() {
   const oc = await req('GET', '/api/object-counts', { token: A });
   const hs = await req('GET', '/api/health/summary', { token: A });
   const wk = hs.data?.anpr_workers?.find((x) => x.mode === 'live');
-  if (wk?.object_detect === false) check('object counts endpoint (object detection off on this worker: synthetic drawings hold no COCO objects)', oc.status === 200 && oc.data && 'totals' in oc.data, JSON.stringify(oc.data?.totals));
+  // Object detection is off in the laptop demo profile (OBJECT_DETECT=0): the worker item then reports no object
+  // weights (`extra.object_weights == null`) and the synthetic drawings hold no COCO objects anyway (CONTRACT §1.3 amendment).
+  const objOff = wk?.object_detect === false || (wk?.extra != null && wk.extra.object_weights == null);
+  if (objOff) check('object counts endpoint (object detection off on this worker: synthetic drawings hold no COCO objects)', oc.status === 200 && oc.data && 'totals' in oc.data, `object_weights=${wk?.extra?.object_weights} totals=${JSON.stringify(oc.data?.totals)}`);
   else check('object counts', oc.status === 200 && Object.keys(oc.data.totals ?? {}).length > 0, JSON.stringify(oc.data?.totals));
   check('health summary anpr worker', Boolean(wk) && wk.stale === false && wk.cameras >= 4, JSON.stringify(wk));
   const allAlerts = (await req('GET', '/api/alerts?status=new,acknowledged,closed&type=watchlist_hit&page_size=200', { token: A })).data.items;
@@ -441,7 +480,8 @@ async function phaseB() {
   check('viewer GET /settings 403', (await req('GET', '/api/settings', { token: vw.token })).status === 403);
 
   // check 25: webhook into the mock sink, signed
-  const wh = await req('POST', '/api/webhooks', { token: A, json: { name: 'integration-sink', url: 'http://api:8000/api/mock-sandbox/webhook-sink', secret: 's3cret-integration', event_types: ['alert.created'] } });
+  // The open sink lives at the API root only (compose network); /api/mock-sandbox/webhook-sink needs the internal key (amendment §5.22).
+  const wh = await req('POST', '/api/webhooks', { token: A, json: { name: 'integration-sink', url: 'http://api:8000/mock-sandbox/webhook-sink', secret: 's3cret-integration', event_types: ['alert.created'] } });
   check('webhook create (secret masked)', wh.status === 201 && wh.data.secret === '********', `${wh.status} ${JSON.stringify(wh.data).slice(0, 120)}`);
   const whTest = await req('POST', `/api/webhooks/${wh.data?.id}/test`, { token: A, json: {} });
   check('webhook test delivery', whTest.status === 200 && (whTest.data.status === 204 || whTest.data.status === 200), JSON.stringify(whTest.data));
@@ -455,10 +495,21 @@ async function phaseB() {
   check('webhook alert.created in sink with valid signature + last_status 2xx', Boolean(sinkHit.value) && sinkHit.value.body?.event === 'alert.created' && Boolean(sinkHit.value.body?.data?.plate_norm) && whRow && whRow.last_status >= 200 && whRow.last_status < 300, sinkHit.value ? `after ${sinkHit.elapsed_s} s plate=${sinkHit.value.body?.data?.plate_norm} last_status=${whRow?.last_status}` : 'no delivery');
   if (wh.data?.id) check('webhook delete', (await req('DELETE', `/api/webhooks/${wh.data.id}`, { token: A })).status === 204);
 
-  // rate limit last
+  // dashboard has no alert flood: open alerts stay bounded (suppression + re-alert window) and no camera_offline alert
+  // exists for a camera that never streamed.
+  const openB = await req('GET', '/api/alerts?status=new,acknowledged&page_size=200', { token: A });
+  const openOffline = (openB.data?.items ?? []).filter((x) => x.type === 'camera_offline').length;
+  const camsB = (await req('GET', '/api/cameras?page_size=200', { token: A })).data?.items ?? [];
+  const neverSeenB = new Set(camsB.filter((c) => !c.last_seen_at).map((c) => c.id));
+  const coB = (await req('GET', '/api/alerts?type=camera_offline&status=new,acknowledged,closed&page_size=200', { token: A })).data?.items ?? [];
+  check('no alert flood: open alerts bounded, no open camera_offline, none ever for never-online cameras', openB.status === 200 && openB.data.total <= 60 && openOffline === 0 && coB.filter((x) => neverSeenB.has(x.camera?.id)).length === 0, `open=${openB.data?.total} open_camera_offline=${openOffline} camera_offline_total=${coB.length} never_seen=${neverSeenB.size} not_streaming=${camsB.filter((c) => c.status === 'not_streaming').length}`);
+  meas.open_alerts_after_run = openB.data?.total ?? null;
+
+  // rate limit last. A throw-away username: five failures lock a username for 15 min (amendment §2.1), and the
+  // per-IP window (10/min) is exhausted for the next minute - the jury accounts must stay usable afterwards.
   const codes = [];
-  for (let i = 0; i < 11; i++) codes.push((await req('POST', '/api/auth/login', { json: { username: 'jury_admin', password: 'wrong' } })).status);
-  check('login rate limit 429 on 11th attempt', codes[0] === 401 && codes[codes.length - 1] === 429, codes.join(','));
+  for (let i = 0; i < 11; i++) codes.push((await req('POST', '/api/auth/login', { json: { username: 'ratelimit_probe', password: 'wrong' } })).status);
+  check('login rate limit: 401 first, 429 by the 11th attempt (username lock after 5 failures, IP window 10/min)', codes[0] === 401 && codes[5] === 429 && codes[codes.length - 1] === 429, codes.join(','));
   saveMeas();
 }
 

@@ -87,10 +87,42 @@ _COPY_FIELDS = (
     "name", "type", "ownership", "lat", "lon", "address", "district", "police_station", "ward", "rtsp_url",
     "whep_url", "hls_url", "codec", "resolution", "fps", "live", "storage_location", "retention_days",
     "install_date", "vendor", "model", "heading_deg", "fov_deg", "connectivity_type", "bandwidth_kbps",
-    "vms_platform", "nvr_id", "onvif_host", "amc_vendor", "amc_expiry", "maintenance_status",
+    "vms_platform", "nvr_id", "onvif_host", "amc_vendor", "amc_expiry", "maintenance_status", "location_confidence",
 )
 
 _RELAY_TRIGGER_FIELDS = ("rtsp_url", "codec", "record_enabled", "anpr_enabled")
+
+
+def merged_metadata(current: dict[str, Any] | None, incoming: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Shallow merge of the JSONB bag: top-level keys of `incoming` replace the stored ones, others survive
+    (a re-import refreshes `enrichment`/`probe`/`catalogue` without wiping keys another path wrote)."""
+    if incoming is None:
+        return current
+    out = dict(current or {})
+    for k, v in incoming.items():
+        if v is None:
+            out.pop(k, None)
+        else:
+            out[k] = v
+    return out or None
+
+
+def pick_existing(rows: list[Camera], source: str) -> dict[str, Camera]:
+    """external_id → the row an import under `source` must update when it may match **any** source.
+
+    Preference per external_id: a row already of `source`, else a non-retired row, else a retired one; ties by
+    lowest id. Used by the organiser-sandbox importer so cameras first loaded through the CSV path (or the bulk
+    API) are converted in place — same `id`, relay path and ANPR assignment — instead of duplicated
+    (CONTRACT Amendments 2026-09-05).
+    """
+    best: dict[str, Camera] = {}
+
+    def rank(c: Camera) -> tuple[int, int, int]:
+        return (0 if c.source == source else 1, 0 if c.status != "retired" else 1, c.id or 0)
+
+    for c in sorted(rows, key=rank):
+        best.setdefault(c.external_id, c)
+    return best
 
 
 async def _resolve_department(db: AsyncSession, code: str | None, aliases: dict[str, str] | None) -> tuple[int, str | None]:
@@ -116,6 +148,7 @@ async def upsert_cameras(
     catalogue_defaults: bool = False,
     present_fields_per_row: list[set[str]] | None = None,
     allow_department_change: bool = True,
+    match_any_source: bool = False,
 ) -> ImportOutcome:
     """Validate and upsert rows `(row_no, index, raw_dict)` on `(source, external_id)`.
 
@@ -129,6 +162,9 @@ async def upsert_cameras(
       `department_code` is validated but the stored department is kept, with a warning.
     - `dry_run`: validate and count only; nothing is added to or changed in the session, so
       the caller's session (and its loaded `User`) stays intact.
+    - `match_any_source`: look existing rows up by `external_id` across **every** source (see
+      `pick_existing`) and convert a match to `source` in place; the relay path (`cam_<id>`) and
+      the ANPR/recording flags survive and no duplicate is created.
     """
     started = time.perf_counter()
     out = ImportOutcome()
@@ -141,8 +177,14 @@ async def upsert_cameras(
             (await db.execute(select(func.count()).select_from(Camera).where(Camera.anpr_enabled.is_(True), Camera.status != "retired"))).scalar() or 0
         )
 
-    existing_rows = (await db.execute(select(Camera).where(Camera.source == source))).scalars().all()
-    existing: dict[str, Camera] = {c.external_id: c for c in existing_rows}
+    if match_any_source:
+        wanted = {str(raw.get("external_id") or "").strip() for _r, _i, raw in rows}
+        wanted.discard("")
+        existing_rows = (await db.execute(select(Camera).where(Camera.external_id.in_(wanted)))).scalars().all() if wanted else []
+        existing = pick_existing(list(existing_rows), source)
+    else:
+        existing_rows = (await db.execute(select(Camera).where(Camera.source == source))).scalars().all()
+        existing = {c.external_id: c for c in existing_rows}
 
     for i, (row_no, index, raw) in enumerate(rows):
         label = row_no if row_no is not None else index
@@ -220,6 +262,10 @@ async def upsert_cameras(
             if cam.status == "retired":
                 changes["status"] = "unknown"
                 changes["retired_at"] = None
+            if cam.source != source:
+                # cross-source match (organiser sandbox re-importing rows first loaded via CSV/API): convert in place
+                changes["source"] = source
+                out.warnings.append(RowIssue(row_no, parsed.external_id, "source", f"existing {cam.source} camera #{cam.id} converted to {source} (same id, relay path and ANPR assignment kept)", index))
             if changes:
                 if not dry_run:
                     for f, v in changes.items():
@@ -263,6 +309,7 @@ def _new_camera(parsed: CameraImportRow, source: str, dept_id: int, created_by: 
         if f in ("name", "type", "ownership", "codec", "maintenance_status"):
             continue
         setattr(cam, f, getattr(parsed, f))
+    cam.meta = merged_metadata(None, parsed.metadata)
     return cam
 
 
@@ -281,6 +328,10 @@ def _pending_changes(cam: Camera, parsed: CameraImportRow, present: set[str]) ->
         new = getattr(parsed, f)
         if f in present and new is not None and getattr(cam, f) != new:
             changes[f] = new
+    if "metadata" in present and parsed.metadata is not None:
+        merged = merged_metadata(cam.meta, parsed.metadata)
+        if merged != cam.meta:
+            changes["meta"] = merged
     return changes
 
 

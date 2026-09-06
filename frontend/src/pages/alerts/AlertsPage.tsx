@@ -11,7 +11,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { BellOutlined, CheckOutlined, CloseCircleOutlined, PlayCircleOutlined, ReloadOutlined, SoundOutlined, VideoCameraOutlined, NodeIndexOutlined } from '@ant-design/icons';
 import { Marker } from '@/components/leaflet';
 import { PageHeader } from '@/components/PageHeader';
-import { useListQuery } from '@/hooks/useListQuery';
+import { rowProps, useListQuery } from '@/hooks/useListQuery';
 import { alertsApi } from '@/api';
 import type { Alert, AlertDetail, AlertOutcome } from '@/api/types';
 import { AlertStatusTag, ConfidenceLevelTag, DepartmentTag, EventTypeTag, PriorityTag, ReasonTag, StatusTag } from '@/components/Tags';
@@ -84,15 +84,15 @@ function AlertDrawer({ id, onClose, onAction }: { id: number | null; onClose: ()
   const a: AlertDetail | undefined = q.data;
   const colour = a ? ALERT_PRIORITY[a.priority].colour : '#9CA3AF';
   return (
-    <Drawer open={id !== null} onClose={onClose} width={760} loading={q.isLoading} title={a ? <Space wrap><span>Alert #{a.id}</span><PriorityTag priority={a.priority} /><AlertStatusTag status={a.status} />{a.escalated ? <Tag color="red" style={{ margin: 0 }}>escalated</Tag> : null}</Space> : 'Alert'} styles={{ header: { borderTop: `4px solid ${colour}` } }} extra={a && canAck && a.status !== 'closed' ? <Space>{a.status === 'new' ? <Button type="primary" icon={<CheckOutlined />} onClick={() => onAction(a, 'ack')}>Acknowledge</Button> : null}<Button type={a.status === 'new' ? 'default' : 'primary'} icon={<CloseCircleOutlined />} onClick={() => onAction(a, 'close')}>Close alert</Button></Space> : null}>
+    <Drawer open={id !== null} onClose={onClose} width={760} loading={q.isLoading} title={a ? <Space wrap><span>Alert #{a.id}</span><PriorityTag priority={a.priority} /><AlertStatusTag status={a.status} />{a.escalated ? <Tooltip title="Unacknowledged for more than 5 minutes"><Tag color="red" style={{ margin: 0 }}>Escalated</Tag></Tooltip> : null}</Space> : 'Alert'} styles={{ header: { borderTop: `4px solid ${colour}` } }} extra={a && canAck && a.status !== 'closed' ? <Space>{a.status === 'new' ? <Button type="primary" icon={<CheckOutlined />} onClick={() => onAction(a, 'ack')}>Acknowledge</Button> : null}<Button type={a.status === 'new' ? 'default' : 'primary'} icon={<CloseCircleOutlined />} onClick={() => onAction(a, 'close')}>Close alert</Button></Space> : null}>
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : null}
       {a ? (
         <div style={{ display: 'grid', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 260px', gap: 12 }}>
             <div>
               <div style={{ fontSize: 16, marginBottom: 6 }}><AlertTitle a={a} /></div>
-              {a.watchlist ? <div style={{ color: '#4B5563' }}>{a.watchlist.name} · source {a.watchlist.source === 'egujcop' ? 'eGujCop' : humanise(a.watchlist.source)} · list priority {a.watchlist.priority}</div> : null}
-              {a.type === 'camera_offline' ? <div style={{ color: '#4B5563' }}>Three consecutive not-ready checks by the health poller. Auto-closes when the camera returns.</div> : null}
+              {a.watchlist ? <div style={{ color: '#4B5563' }}>{a.watchlist.name} · source {a.watchlist.source === 'egujcop' ? 'eGujCop' : humanise(a.watchlist.source)} · list priority {ALERT_PRIORITY[a.watchlist.priority]?.label ?? humanise(a.watchlist.priority)}</div> : null}
+              {a.type === 'camera_offline' ? <div style={{ color: '#4B5563' }}>The camera did not answer three health checks in a row (one per minute). Closes by itself when the camera comes back.</div> : null}
               <div style={{ marginTop: 10 }}>
                 <CropThumb src={a.snapshot_url} alt={a.plate_norm ? `Plate crop ${a.plate_norm}` : `Snapshot from ${a.camera.name}`} width={360} height={a.type === 'watchlist_hit' ? 100 : 200} sha256={a.snapshot_sha256} />
               </div>
@@ -213,7 +213,7 @@ export function AlertsPage() {
   const columns: ColumnsType<Alert> = [
     { title: 'Priority', dataIndex: 'priority', width: 110, render: (v: string, a) => <Space size={4}><PriorityTag priority={v} size="small" />{a.escalated ? <Tooltip title="Unacknowledged for more than 5 minutes"><Tag color="red" style={{ margin: 0 }}>!</Tag></Tooltip> : null}</Space> },
     { title: 'Snapshot', dataIndex: 'snapshot_url', width: 96, render: (u: string | null, a) => <CropThumb src={u} alt={a.plate_norm ? `Plate ${a.plate_norm}` : 'Snapshot'} width={80} height={32} preview={false} /> },
-    { title: 'Alert', key: 'title', width: 300, render: (_v, a) => <div><AlertTitle a={a} /><div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{a.watchlist?.name ?? (a.type === 'camera_offline' ? 'Health poller' : humanise(a.type))}</div></div> },
+    { title: 'Alert', key: 'title', width: 300, render: (_v, a) => <div><AlertTitle a={a} /><div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{a.watchlist?.name ?? (a.type === 'camera_offline' ? 'Camera health check' : humanise(a.type))}</div></div> },
     { title: 'Camera', dataIndex: ['camera', 'name'], width: 220, ellipsis: true, render: (v: string, a) => <span><strong>{v}</strong><div style={{ fontSize: 11, color: '#6B7280' }}>{a.camera.district ?? '—'} · {a.camera.department_name || a.camera.department_code}</div></span> },
     { title: 'Status', dataIndex: 'status', width: 130, render: (v: string) => <AlertStatusTag status={v} size="small" /> },
     { title: 'Raised', dataIndex: 'created_at', key: 'created_at', sorter: true, width: 150, render: (v: string) => <IstTime value={v} mode="relative" /> },
@@ -243,8 +243,20 @@ export function AlertsPage() {
         description={`Watchlist hits, camera-offline and intrusion alerts sorted by priority then time · ${list.total} shown. New alerts arrive over the live channel with a toast, a sound and a desktop notification.`}
         extra={
           <Space wrap>
-            <Tooltip title="Play a sound on every new alert"><Space size={6}><SoundOutlined style={{ color: soundOn ? '#1E4DB7' : '#9CA3AF' }} /><Switch size="small" checked={soundOn} onChange={setSoundOn} aria-label="Alert sound" /></Space></Tooltip>
-            <Tooltip title="OS notification when this tab is in the background"><Space size={6}><BellOutlined style={{ color: desktopNotify ? '#1E4DB7' : '#9CA3AF' }} /><Switch size="small" checked={desktopNotify} onChange={(v) => (v ? void enableDesktop() : setDesktopNotify(false))} aria-label="Desktop notifications" /></Space></Tooltip>
+            <Tooltip title="Play a sound on every new alert">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <SoundOutlined style={{ color: soundOn ? '#1E4DB7' : '#9CA3AF' }} aria-hidden />
+                <Switch size="small" checked={soundOn} onChange={setSoundOn} aria-label="Alert sound" />
+                <span style={{ fontSize: 12, color: '#4B5563' }}>Sound</span>
+              </label>
+            </Tooltip>
+            <Tooltip title="Browser notification when this tab is in the background (asks for permission the first time)">
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <BellOutlined style={{ color: desktopNotify ? '#1E4DB7' : '#9CA3AF' }} aria-hidden />
+                <Switch size="small" checked={desktopNotify} onChange={(v) => (v ? void enableDesktop() : setDesktopNotify(false))} aria-label="Desktop alerts" />
+                <span style={{ fontSize: 12, color: '#4B5563' }}>Desktop alerts</span>
+              </label>
+            </Tooltip>
             <Button icon={<ReloadOutlined />} loading={list.query.isFetching} onClick={() => void list.query.refetch()}>
               Refresh
             </Button>
@@ -257,7 +269,7 @@ export function AlertsPage() {
           <div className="sg-toolbar-left">
             <Select mode="multiple" placeholder="Status" style={{ minWidth: 220 }} options={[{ value: 'new', label: 'New' }, { value: 'acknowledged', label: 'Acknowledged' }, { value: 'closed', label: 'Closed' }]} value={status} onChange={setStatus} maxTagCount="responsive" aria-label="Status" />
             <Select allowClear placeholder="Type" style={{ width: 150 }} options={[{ value: 'watchlist_hit', label: 'Watchlist hit' }, { value: 'camera_offline', label: 'Camera offline' }, { value: 'intrusion', label: 'Intrusion' }]} value={type} onChange={setType} aria-label="Type" />
-            <Select allowClear placeholder="Priority" style={{ width: 120 }} options={['critical', 'high', 'medium', 'low'].map((p) => ({ value: p, label: humanise(p) }))} value={priority} onChange={setPriority} aria-label="Priority" />
+            <Select allowClear placeholder="Priority" style={{ width: 120 }} options={(['critical', 'high', 'medium', 'low'] as const).map((p) => ({ value: p, label: ALERT_PRIORITY[p].label }))} value={priority} onChange={setPriority} aria-label="Priority" />
             <Select allowClear showSearch optionFilterProp="label" placeholder="Camera" style={{ width: 230 }} options={cameraOptions} value={cameraId} onChange={setCameraId} aria-label="Camera" />
             <Space size={6}><Switch size="small" checked={escalatedOnly} onChange={setEscalatedOnly} aria-label="Escalated only" /><span style={{ fontSize: 12, color: '#6B7280' }}>Escalated only</span></Space>
           </div>
@@ -282,7 +294,7 @@ export function AlertsPage() {
             sticky
             scroll={{ x: 1150 }}
             rowClassName={(a) => [a.status === 'new' ? 'sg-row-new' : '', flashIds.includes(a.id) ? 'sg-row-flash' : ''].join(' ')}
-            onRow={(a) => ({ onClick: () => setOpenId(a.id) })}
+            onRow={(a) => rowProps(() => setOpenId(a.id))}
           />
         )}
       </Card>

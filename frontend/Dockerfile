@@ -26,7 +26,7 @@ FROM caddy:2-alpine
 
 LABEL org.opencontainers.image.title="Sentinel Gujarat web" \
       org.opencontainers.image.vendor="Dynatech Consultancy" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="MIT"
 
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/dist /srv

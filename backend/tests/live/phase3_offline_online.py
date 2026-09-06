@@ -68,7 +68,7 @@ async def main():
             task.cancel()
         check("ws health messages offline+online", any(h["status"] == "offline" for h in health_msgs) and any(h["status"] == "online" and h["previous_status"] == "offline" for h in health_msgs), json.dumps([(h["status"], h["previous_status"], h["source_flag"]) for h in health_msgs]))
         r = await c.get("/api/health/summary", headers=A); j = r.json()
-        check("health summary online>=8 offline==42", j["cameras"]["online"] >= 8 and j["cameras"]["offline"] == 42, json.dumps(j["cameras"]) + f" uptime={j['uptime_24h_pct']} mtx={j['mediamtx']}")
+        check("health summary online>=8 not_streaming==42 offline==0", j["cameras"]["online"] >= 8 and j["cameras"]["not_streaming"] == 42 and j["cameras"]["offline"] == 0, json.dumps(j["cameras"]) + f" uptime={j['uptime_24h_pct']} mtx={j['mediamtx']}")
     failed = [n for n, ok, _ in results if not ok]
     print(f"\n{len(results) - len(failed)} passed, {len(failed)} failed: {failed}")
     sys.exit(1 if failed else 0)

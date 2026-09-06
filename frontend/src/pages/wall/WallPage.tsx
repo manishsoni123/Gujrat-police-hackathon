@@ -10,6 +10,7 @@ import type { WallLayout } from '@/api/types';
 import { useCameraOptions } from '@/hooks/useCamerasOptions';
 import { EmptyState, ErrorState } from '@/components/States';
 import { StatusTag, CodecTag } from '@/components/Tags';
+import { cameraSourceLabel } from '@/utils/labels';
 import { useHealthSocket } from '@/ws/useHealthSocket';
 
 const LIVE_SLOTS_IN_16 = 4;
@@ -95,7 +96,7 @@ export function WallPage() {
           <span>
             Simultaneous live tiles via WebRTC with automatic HLS fallback. The 16-grid shows {LIVE_SLOTS_IN_16} live tiles and 12 snapshot tiles refreshed every second.
             {systems.length > 1 ? (
-              <Tooltip title={`Feeds from ${systems.length} different systems on one wall: ${systems.join(', ')}`}>
+              <Tooltip title={`Feeds from ${systems.length} different systems on one wall: ${systems.map(cameraSourceLabel).join(', ')}`}>
                 <Tag color="blue" style={{ marginLeft: 8 }}>
                   {systems.length} systems
                 </Tag>
@@ -157,9 +158,9 @@ export function WallPage() {
                   onChange={(v) => setSlot(i, (v as number | undefined) ?? null)}
                   aria-label={`Camera for slot ${i + 1}`}
                 />
-                {cam ? <span style={{ flex: 'none' }}><StatusTag status={cam.status} size="small" /></span> : null}
+                {cam ? <span style={{ flex: 'none' }}><StatusTag status={cam.status} live={cam.live} size="small" short /></span> : null}
                 {cam && grid < 16 ? <span style={{ flex: 'none' }}><CodecTag codec={cam.codec} /></span> : null}
-                {snapshotOnly ? <Tag style={{ margin: 0 }}>snapshot</Tag> : null}
+                {snapshotOnly ? <Tag style={{ margin: 0 }}>Snapshot</Tag> : null}
                 {cameraId ? <Button size="small" type="text" icon={<CloseOutlined />} onClick={() => setSlot(i, null)} aria-label="Clear slot" style={{ color: '#94A3B8' }} /> : null}
               </div>
             </div>

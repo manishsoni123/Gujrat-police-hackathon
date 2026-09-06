@@ -6,7 +6,7 @@ import { Alert, Button, Card, Checkbox, DatePicker, Form, Input, Modal, Select, 
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, InboxOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
-import { useListQuery } from '@/hooks/useListQuery';
+import { rowProps, useListQuery } from '@/hooks/useListQuery';
 import { watchlistApi } from '@/api';
 import { ApiError, errorMessage } from '@/api/client';
 import type { WatchlistEntry, WatchlistImportResult, WatchlistInput } from '@/api/types';
@@ -73,7 +73,7 @@ function EntryModal({ open, onClose, entry }: { open: boolean; onClose: () => vo
       {conflict !== null ? <Alert type="warning" showIcon message="This plate is already on the active watchlist" description={conflict > 0 ? `Existing entry #${conflict}. Edit that entry instead of adding a duplicate.` : undefined} style={{ marginBottom: 12 }} /> : null}
       <Form form={form} layout="vertical" requiredMark={false}>
         <Form.Item name="entity_type" label="Entity">
-          <Select options={[{ value: 'vehicle', label: 'Vehicle (plate)' }, { value: 'person', label: 'Person (FRS roadmap)' }]} disabled={Boolean(entry)} />
+          <Select options={[{ value: 'vehicle', label: 'Vehicle (plate)' }, { value: 'person', label: 'Person (face recognition, roadmap)' }]} disabled={Boolean(entry)} />
         </Form.Item>
         {entity !== 'person' ? (
           <Form.Item name="plate" label="Registration" rules={[{ required: true, message: 'Enter the registration' }]} validateStatus={fieldErrors.plate ? 'error' : undefined} help={fieldErrors.plate ?? (preview ? (preview.is_valid_format ? `Stored as ${formatPlate(preview.plate_norm)}` : 'Not a valid Indian format - the API will reject it') : undefined)}>
@@ -269,7 +269,7 @@ export function WatchlistPage() {
         ) : empty ? (
           <EmptyState title={hasFilters ? 'No entries match these filters' : 'The watchlist is empty'} description={hasFilters ? 'Clear a filter or include inactive entries.' : 'Add a plate manually or import an eGujCop / own CSV. Alerts fire within seconds of the next read.'} actions={canWrite && !hasFilters ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setModal({ open: true, entry: null })}>Add to watchlist</Button> : undefined} />
         ) : (
-          <Table<WatchlistEntry> className="sg-table" size="middle" rowKey="id" columns={columns} dataSource={list.items} loading={list.query.isLoading} pagination={list.pagination} onChange={list.onTableChange} sticky scroll={{ x: 1480 }} rowClassName={(w) => (!w.is_effective ? 'sg-row-retired' : '')} onRow={(w) => ({ onClick: () => (canWrite ? setModal({ open: true, entry: w }) : undefined) })} />
+          <Table<WatchlistEntry> className="sg-table" size="middle" rowKey="id" columns={columns} dataSource={list.items} loading={list.query.isLoading} pagination={list.pagination} onChange={list.onTableChange} sticky scroll={{ x: 1480 }} rowClassName={(w) => (!w.is_effective ? 'sg-row-retired' : '')} onRow={(w) => rowProps(canWrite ? () => setModal({ open: true, entry: w }) : undefined)} />
         )}
       </Card>
       <EntryModal open={modal.open} entry={modal.entry} onClose={() => setModal({ open: false, entry: null })} />

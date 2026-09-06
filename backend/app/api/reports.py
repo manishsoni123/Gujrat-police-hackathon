@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.errors import forbidden, validation_error
 from app.core.rbac import has_permission
 from app.core.tz import fmt_ist, iso_z, utcnow
-from app.db.models import Alert, Camera, ObjectCount, PlateRead, ReportFile, Sighting
+from app.db.models import CAMERA_SOURCES, Alert, Camera, ObjectCount, PlateRead, ReportFile, Sighting
 from app.schemas.common import PageParams, parse_window
 from app.services import lookups, quality, serializers
 from app.services.audit import set_audit
@@ -34,14 +34,25 @@ def _stamp_for_name(dt) -> str:
     return to_utc(dt).astimezone(IST).strftime("%Y%m%d_%H%M")
 
 
+def _camera_source(source: str | None) -> str | None:
+    """`?source=sandbox|csv|api|manual|own` restricts a report to cameras of one registry source (e.g. the
+    organiser feed only, without the own gate); unknown values are a 422, empty means every source."""
+    if not source:
+        return None
+    if source not in CAMERA_SOURCES:
+        raise validation_error("Unknown camera source", [{"field": "source", "message": f"one of {', '.join(CAMERA_SOURCES)}"}])
+    return source
+
+
 @router.get("/reports/detections", dependencies=[Depends(require_permission("reports.export"))])
 async def detections_report(
     user: CurrentUser, db: DbDep, request: Request, from_: str | None = Query(None, alias="from"), to: str | None = None,
     camera_id: int | None = None, department_id: int | None = None, district: str | None = None, min_conf: float | None = Query(None, ge=0, le=1),
-    valid_only: bool = False, plate: str | None = None, format: str = Query("csv"),
+    valid_only: bool = False, plate: str | None = None, format: str = Query("csv"), source: str | None = None,
 ):
     if format not in ("csv", "pdf"):
         raise validation_error("Unsupported format", [{"field": "format", "message": "csv or pdf"}])
+    source = _camera_source(source)
     t_from, t_to = parse_window(from_, to, None, max_days=7, from_required=True)
     scope = user_scope(user)
     await serializers.warm(db)
@@ -55,6 +66,8 @@ async def detections_report(
         stmt = stmt.where(Camera.department_id == department_id)
     if district:
         stmt = stmt.where(Camera.district == district)
+    if source:
+        stmt = stmt.where(Camera.source == source)
     if min_conf is not None:
         stmt = stmt.where(PlateRead.confidence >= min_conf)
     if valid_only:
@@ -64,7 +77,7 @@ async def detections_report(
     total = int((await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0)
     cap = CSV_CAP if format == "csv" else PDF_CAP
     rows_db = (await db.execute(stmt.order_by(PlateRead.captured_at.asc(), PlateRead.id.asc()).limit(cap))).all()
-    filters = {k: v for k, v in {"from": iso_z(t_from), "to": iso_z(t_to), "camera_id": camera_id, "department_id": department_id, "district": district, "min_conf": min_conf, "valid_only": valid_only, "plate": plate}.items() if v not in (None, False)}
+    filters = {k: v for k, v in {"from": iso_z(t_from), "to": iso_z(t_to), "camera_id": camera_id, "department_id": department_id, "district": district, "source": source, "min_conf": min_conf, "valid_only": valid_only, "plate": plate}.items() if v not in (None, False)}
     capped = total > len(rows_db)
 
     records: list[dict[str, Any]] = []
@@ -84,8 +97,8 @@ async def detections_report(
         rf = await store_report(db, "detections_csv", content, "csv", user.username, user.id, filters, len(rows))
         media, fname = "text/csv; charset=utf-8", f"detections_{fname_stamp}.csv"
     else:
-        summary = await _summary(db, scope, t_from, t_to, records, camera_id, department_id, district)
-        q = await quality.compute(db, scope, t_from, t_to, camera_id)
+        summary = await _summary(db, scope, t_from, t_to, records, camera_id, department_id, district, source)
+        q = await quality.compute(db, scope, t_from, t_to, camera_id, source)
         window = {"from_ist": fmt_ist(t_from), "to_ist": fmt_ist(t_to), "filters_text": ", ".join(f"{k}={v}" for k, v in filters.items() if k not in ("from", "to")) or "none"}
         content = detections_pdf(user.username, window, summary, records, q, capped)
         rf = await store_report(db, "detections_pdf", content, "pdf", user.username, user.id, filters, len(records))
@@ -94,7 +107,7 @@ async def detections_report(
     return Response(content=content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{fname}"', "X-Sentinel-Sha256": rf.sha256, "X-Sentinel-Report-Id": str(rf.id)})
 
 
-async def _summary(db, scope, t_from, t_to, records: list[dict[str, Any]], camera_id, department_id, district) -> dict[str, Any]:
+async def _summary(db, scope, t_from, t_to, records: list[dict[str, Any]], camera_id, department_id, district, source: str | None = None) -> dict[str, Any]:
     cams = {r["camera_id"] for r in records}
     depts = {r["department"] for r in records if r["department"]}
     valid = sum(1 for r in records if r["is_valid_format"])
@@ -104,13 +117,16 @@ async def _summary(db, scope, t_from, t_to, records: list[dict[str, Any]], camer
         s_q = s_q.where(cond)
     if camera_id:
         s_q = s_q.where(Sighting.camera_id == camera_id)
-    if department_id or district:
-        sub = select(Camera.id)
+    cam_sub = None
+    if department_id or district or source:
+        cam_sub = select(Camera.id)
         if department_id:
-            sub = sub.where(Camera.department_id == department_id)
+            cam_sub = cam_sub.where(Camera.department_id == department_id)
         if district:
-            sub = sub.where(Camera.district == district)
-        s_q = s_q.where(Sighting.camera_id.in_(sub))
+            cam_sub = cam_sub.where(Camera.district == district)
+        if source:
+            cam_sub = cam_sub.where(Camera.source == source)
+        s_q = s_q.where(Sighting.camera_id.in_(cam_sub))
     sightings, unique_plates = (await db.execute(s_q)).one()
     oc_q = select(ObjectCount.class_, func.sum(ObjectCount.count)).where(ObjectCount.minute >= t_from, ObjectCount.minute <= t_to).group_by(ObjectCount.class_)
     ocond = in_scope_condition(scope, ObjectCount.camera_id)
@@ -118,6 +134,8 @@ async def _summary(db, scope, t_from, t_to, records: list[dict[str, Any]], camer
         oc_q = oc_q.where(ocond)
     if camera_id:
         oc_q = oc_q.where(ObjectCount.camera_id == camera_id)
+    if cam_sub is not None:
+        oc_q = oc_q.where(ObjectCount.camera_id.in_(cam_sub))
     oc = {r[0]: int(r[1] or 0) for r in (await db.execute(oc_q)).all()}
     a_q = select(func.count()).select_from(Alert).where(Alert.created_at >= t_from, Alert.created_at <= t_to)
     acond = in_scope_condition(scope, Alert.camera_id)
@@ -125,6 +143,8 @@ async def _summary(db, scope, t_from, t_to, records: list[dict[str, Any]], camer
         a_q = a_q.where(acond)
     if camera_id:
         a_q = a_q.where(Alert.camera_id == camera_id)
+    if cam_sub is not None:
+        a_q = a_q.where(Alert.camera_id.in_(cam_sub))
     alerts = int((await db.execute(a_q)).scalar() or 0)
     return {
         "cameras": len(cams), "departments": len(depts), "reads": len(records), "valid_pct": (100.0 * valid / len(records)) if records else 0.0,
@@ -135,21 +155,22 @@ async def _summary(db, scope, t_from, t_to, records: list[dict[str, Any]], camer
 @router.get("/reports/quality")
 async def quality_report(
     user: CurrentUser, db: DbDep, request: Request, from_: str | None = Query(None, alias="from"), to: str | None = None,
-    camera_id: int | None = None, format: str = Query("json"),
+    camera_id: int | None = None, format: str = Query("json"), source: str | None = None,
 ):
     if format not in ("json", "pdf"):
         raise validation_error("Unsupported format", [{"field": "format", "message": "json or pdf"}])
     needed = "reports.export" if format == "pdf" else "analytics.read"
     if not has_permission(user.role, needed):
         raise forbidden()
+    source = _camera_source(source)
     t_from, t_to = parse_window(from_, to, 24, max_days=31)
     await serializers.warm(db)
-    q = await quality.compute(db, user_scope(user), t_from, t_to, camera_id)
+    q = await quality.compute(db, user_scope(user), t_from, t_to, camera_id, source)
     if format == "json":
         return q
     q["window"].update({"from_ist": fmt_ist(t_from), "to_ist": fmt_ist(t_to)})
     content = quality_pdf(user.username, q)
-    rf = await store_report(db, "quality_pdf", content, "pdf", user.username, user.id, {"from": iso_z(t_from), "to": iso_z(t_to), "camera_id": camera_id}, q["reads_total"])
+    rf = await store_report(db, "quality_pdf", content, "pdf", user.username, user.id, {"from": iso_z(t_from), "to": iso_z(t_to), "camera_id": camera_id, "source": source}, q["reads_total"])
     set_audit(request, action="report.quality", entity="report_file", entity_id=rf.id, after={"sha256": rf.sha256, "path": rf.path, "reads": q["reads_total"], "labelled": q["labelled"]})
     return Response(content=content, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="quality_{_stamp_for_name(t_from)}_{_stamp_for_name(t_to)}_IST.pdf"', "X-Sentinel-Sha256": rf.sha256, "X-Sentinel-Report-Id": str(rf.id)})
 

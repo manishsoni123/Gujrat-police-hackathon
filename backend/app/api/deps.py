@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import forbidden, unauthorized
 from app.core.rbac import Scope, has_permission, scope_for
-from app.core.security import decode_token, hash_api_key, valid_api_key_format
+from app.core.security import decode_token, hash_api_key, token_issued_after_reset, valid_api_key_format
 from app.core.tz import utcnow
 from app.db.models import ApiKey, User
 from app.db.session import SessionLocal, get_db
@@ -22,6 +22,16 @@ api_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False, scheme_name="a
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
+QUERY_TOKEN_PREFIXES = ("/ws/", "/media/")
+
+
+def query_token_allowed(path: str) -> bool:
+    """`?token=` is honoured on WebSocket and download/media links only (CONTRACT §2.1): on REST
+    routes it would land in Caddy's access log with every pasted link. `/api/auth/verify` reads the
+    forwarded URI's token itself (`media_auth.token_from_uri`)."""
+    return path.startswith(QUERY_TOKEN_PREFIXES)
+
+
 def extract_token(request: Request | WebSocket) -> str | None:
     auth = request.headers.get("authorization")
     if auth and auth.lower().startswith("bearer "):
@@ -30,7 +40,7 @@ def extract_token(request: Request | WebSocket) -> str | None:
     if cookie:
         return cookie
     token = request.query_params.get("token")
-    if token:
+    if token and query_token_allowed(request.url.path):
         return token
     return None
 
@@ -48,6 +58,8 @@ async def user_from_token(db: AsyncSession, token: str | None) -> User | None:
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         return None
+    if not token_issued_after_reset(claims, user.token_not_before):
+        return None  # revoked by a password reset/change, deactivation or role change
     return user
 
 

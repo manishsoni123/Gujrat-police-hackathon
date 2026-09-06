@@ -43,3 +43,16 @@ docker run --rm sentinel-api python -c "import app.main"
   acceptance check 27 expects.
 * API keys: generated keys are `sk_` + 40 chars; the seeded defaults from CONTRACT §1.3 are 42 chars long, so the
   validator accepts 40–48 characters.
+* Camera status `not_streaming` (CONTRACT Amendments 2026-09-05): a camera that never delivered a stream (catalogue
+  `live=false`, or a source that never answered) is `not_streaming`, never `offline`, and raises no alert/event; only an
+  online/degraded → offline transition alerts. The pure state machine is `services/health_poller.decide_status`
+  (`tests/test_health_state.py`). `uptime_24h_pct` counts monitored cameras only (`source_flag != catalogue`).
+* Public-deployment hardening (`COOKIE_SECURE=1` / https `PUBLIC_BASE_URL`): default `JWT_SECRET`/`POSTGRES_PASSWORD` are
+  fatal; default API keys / jury passwords log a `SECURITY WARNING`, set `default_secrets_in_use` on `/healthz` and keep the
+  seeded bulk key inactive. Outbound URLs (catalogue, webhooks) go through `core/urlguard.py` (`ALLOW_PRIVATE_URLS=1`
+  or `MOCK_SANDBOX=1` permits compose/private hosts). `?token=` is honoured on `/ws/*` and `/media/*` only.
+* Tokens: PyJWT HS256 with `exp`/`iat`/`sub` required; `users.token_not_before` revokes tokens after a password
+  reset/change, deactivation or role change. Login: per-IP window (all attempts) + per-username lock (5 failures / 15 min).
+* Settings not in the CONTRACT freeze: `alerts.re_alert_minutes` (env `ALERT_RE_ALERT_MINUTES`, default 60, 0 = never
+  re-alert while an alert is open).
+* CSV exports/templates/error reports neutralise spreadsheet formulas (`csv_importer.neutralise_cell`).

@@ -6,9 +6,9 @@
 | **Team** | Dynatech Consultancy · Category 2 (Company / Systems Integrator) |
 | **Product** | **Sentinel Gujarat** · version `1.0.0-phase1` (git tag `v1.0-phase1`) |
 | **Models** | **Model 1 (Centralised CCTV Registry & GIS) + Model 2 (Unified Viewing & Metadata Analytics)**, with a hybrid roadmap to Models 3 and 4 |
-| **Hosted demo** | `[FILL: https://<demo-domain>]` — jury credentials are supplied in the portal submission form |
-| **Repository** | `[FILL: GitHub URL]` (tag `v1.0-phase1`) |
-| **Document status** | Near-final draft, 5 September 2026. Performance figures are from the CPU-only laptop integration run of 5 Sept (README "Measured on a 12-core laptop", `docs/acceptance-log.md`); GPU throughput is filled from the VM soak; items marked `[SCREENSHOT]` receive an image before PDF export |
+| **Hosted demo** | The hosted URL and the four jury logins (admin, operator, viewer, department admin) are entered in the portal submission form, not printed in this document. Deployment: `deploy/deploy.sh --domain <fqdn> --gpu` (README §3) |
+| **Repository** | Git repository and tag `v1.0-phase1` are given in the portal submission form and in the Drive file `07_Source/repo-link.txt` (`submission-checklist.md` §1) |
+| **Document status** | Final draft, 5 September 2026. Every performance figure is from the CPU-only laptop integration run of 5 Sept (README "Measured on a 12-core laptop", `docs/acceptance-log.md`). No GPU throughput has been measured in this submission; GPU cameras-per-card figures in `SCALE-PLAN.md` §1.1 are vendor planning values and are labelled as such. Screenshots embedded below are from `docs/screenshots/live/` (local stack, 5 Sept 2026) |
 | **Companion documents** | `SCALE-PLAN.md` (Plan for Scale, cost estimate, phased rollout) · `REGISTRY-API.md` (rendered OpenAPI) · `LICENCES.md` · `submission-checklist.md` |
 
 All times in the product are stored in UTC and rendered in IST (`Asia/Kolkata`) as `dd MMM yyyy, HH:mm:ss IST`. Every runtime component is open source (see `LICENCES.md`); no cloud AI API is used anywhere.
@@ -78,7 +78,7 @@ A web platform on which Gujarat Police can **register every camera on a map, wat
 | # | Objective | Evidence in the demo |
 |---|---|---|
 | O1 | Onboard the ~50 sandbox cameras in one click and measure the time | Import summary "50 fetched · 50 added · 8 ANPR-enabled · onboarded in N s · first stream ready in M ms" |
-| O2 | Show feeds from at least two different systems in one viewer | Wall with sandbox cameras and the own private-society camera side by side; "Two systems" badge |
+| O2 | Show feeds from at least two different systems in one viewer | Wall with sandbox cameras and the own private-society camera side by side; "2 systems" badge |
 | O3 | Read plates with confidence and timestamps, store crops with hashes | Detections page, live-reads overlay, SHA-256 per crop |
 | O4 | Alert within seconds of a watchlisted plate being read | Toast + sound + desktop notification + panel; `latency_ms` on every alert |
 | O5 | Reconstruct a vehicle's route across cameras with operator confirmation | Route page: numbered markers, polyline, timeline, crops, PDF |
@@ -166,7 +166,7 @@ ASCII rendering for readers without Mermaid:
 | **ANPR worker** | Python 3.11, ffmpeg, onnxruntime, PaddleOCR (PP-OCRv4), OpenCV, YOLOX-s (ONNX) | Decode, detect, OCR, normalise, vote, sightings, object counts, snapshots, loop-reset detection; posts everything to the API; two modes (`live`, `preindex`); `CPU=1` path for any laptop | Reads `GET /internal/anpr-config`; posts `/internal/detections`, `/internal/snapshots`, `/internal/heartbeat`, `/internal/events` |
 | **Database** | PostgreSQL 16 with PostGIS, `pg_trgm`, `fuzzystrmatch` | Single datastore; geography column on cameras for `ST_DWithin`/`ST_Buffer`; trigram indexes for fuzzy plate search; append-only audit trigger | `create_all` at startup; idempotent seed |
 | **File store** | Docker volume `/data` | Crops, frames, snapshots, clips, reports, exports; content-addressed, SHA-256 computed on write | Served by the API at `/media/*` with auth and scoping |
-| **Frontend** | React 18, TypeScript, Vite, Ant Design 5, TanStack Query, react-leaflet + markercluster, hls.js, recharts | 19 routes (login, dashboard, registry, import, camera page, map, wall, detections, vehicles, route, watchlist, alerts, events, reports, health, gap analysis, audit, settings, about) | Same-origin `/api`, `/ws`, `/mtx`, `/playback`, `/media` |
+| **Frontend** | React 18, TypeScript, Vite, Ant Design 5, TanStack Query, Leaflet (BSD) with in-repo React bindings `frontend/src/components/leaflet.tsx` (MIT, ours — no react-leaflet) + leaflet.markercluster, hls.js, recharts | 19 routes (login, dashboard, registry, import, camera page, map, wall, detections, vehicles, route, watchlist, alerts, events, reports, health, gap analysis, audit, settings, about) | Same-origin `/api`, `/ws`, `/mtx`, `/playback`, `/media` |
 
 ### 3.3 Component interactions (runtime)
 
@@ -193,7 +193,7 @@ flowchart TB
   subgraph VM["Ubuntu 22.04 VM · Docker Compose project 'sentinel'"]
     CADDY["web (caddy:2)<br/>SPA from /srv · auto-TLS<br/>/api /ws /media → api · /mtx /playback → mediamtx"]
     API["api (python:3.11-slim + ffmpeg)<br/>FastAPI · uvicorn · APScheduler"]
-    MTX["mediamtx (bluenviron/mediamtx:latest-ffmpeg)<br/>8554 RTSP · 8889 WHEP · 8888 HLS · 9996 playback · 9997 API"]
+    MTX["mediamtx (bluenviron/mediamtx:1.20.1-ffmpeg)<br/>8554 RTSP · 8889 WHEP · 8888 HLS · 9996 playback · 9997 API"]
     PG[("postgres (postgis/postgis:16-3.4)<br/>volume pgdata")]
     LIVE["anpr-live / anpr-live-gpu<br/>profile cpu | gpu"]
     PRE["anpr-preindex / anpr-preindex-gpu"]
@@ -288,7 +288,7 @@ Every adapter produces the same `CameraImportRow` (external_id, name, department
 
 ### 4.5 Two systems in one viewer (Model 2 expected deliverable)
 
-The video wall shows the **organiser sandbox** (source `sandbox`) and our **own private-society camera** (source `own`, `ownership=private`, external id `OWN-GATE-01`) side by side, with a "Two systems" badge; an ONVIF LAN camera (S8) would make three. The own camera is presented as the "private / public-facing CCTV onboarding" bonus item: a society gate camera onboarded by RTSP with a read-only credential.
+The video wall shows the **organiser sandbox** (source `sandbox`) and our **own private-society camera** (source `own`, `ownership=private`, external id `OWN-GATE-01`) side by side, with a "2 systems" badge; an ONVIF LAN camera (S8) would make three. The own camera is presented as the "private / public-facing CCTV onboarding" bonus item: a society gate camera onboarded by RTSP with a read-only credential.
 
 ---
 
@@ -308,8 +308,23 @@ The video wall shows the **organiser sandbox** (source `sandbox`) and our **own 
 
 - **Dispersed sources, one control point.** MediaMTX pulls from any RTSP host reachable from the VM (sandbox, departmental NVR, 4G camera). Sources are pulled **on demand** and closed after 60 s idle, so an 80,000-camera registry does not mean 80,000 permanent pulls; ANPR-enabled cameras keep their pull alive by being read continuously.
 - **Browser reality.** The sandbox's own WHEP/HLS endpoints are plain HTTP on another origin; embedding them in an HTTPS UI would break on mixed content, CORS and one-connection-per-viewer. The relay serves WHEP and HLS from our origin behind authentication.
-- **Health.** MediaMTX exposes `ready`, `tracks`, `bytesReceived` and `readers` per path; idle on-demand paths report `ready=false`, so the poller actively `ffprobe`s up to 20 not-ready cameras per tick (4 in parallel) and never probes cameras the catalogue marks `live=false`.
+- **Health.** MediaMTX exposes `ready`, `tracks`, `bytesReceived` and `readers` per path; idle on-demand paths report `ready=false`, so the poller actively `ffprobe`s not-ready cameras — an *external* source (the organiser sandbox, a departmental NVR) directly at its URL with the `sandbox.probe_timeout_s` cap (45 s on the laptop; the sandbox answers a DESCRIBE in 4–38 s), a local source through the relay with a 6 s cap — at most 6 in parallel, at most `HEALTH_PROBE_MAX` per tick, an idle camera at most once per 300 s, and never a camera the catalogue marks `live=false` ("pace your load"). Probing the sandbox *through* the relay left a 60 s on-demand copy of every probed stream running and flapped 7–10 cameras per tick; the direct probe is one short connection per camera.
 - **Self-healing.** Runtime-added MediaMTX paths are not persisted; the API re-adds every non-retired camera's path on start-up and whenever the poller finds one missing.
+- **Browser-safe codecs.** H.265 sources and H.264 sources with B-frames (MediaMTX refuses a WebRTC reader for them and its HLS muxer fails on long reorder chains) are re-encoded on demand into `cam_<id>_h264` (libx264 720p `ultrafast` 1200k on the CPU profile, NVENC on the GPU profile); the import probe records `has_b_frames`, `needs_transcode` picks the play path, and `GET /streams/{id}` tells the player `transcoded` / `whep_supported` / `preferred_mode`.
+
+### 5.2a Verified against the organiser sandbox (5 Sept 2026)
+
+| Fact | Verified value |
+|---|---|
+| Catalogue | `https://cctv.corp8.cloud/cameras.json` behind the portal login: **30 cameras** `cam01`–`cam30`, fields `id` + `name` only; the saved copy `media/cameras.json` is mounted read-only in the API and can be replaced by an upload |
+| Streams | MediaMTX relay `103.250.160.189`, RTSP 8554 (TCP forced) and WHEP 8889; HTTP Basic with the registered **e-mail** + a separate **access password** embedded in the URL (`rtsp://<email %40>:<password>@host:8554/stream/<id>`); path ids lower-case, case-sensitive; only cam01–05 carry SDP titles |
+| Credentials | `SANDBOX_STREAM_EMAIL` / `SANDBOX_STREAM_PASSWORD` in `deploy/.env` seed the `sandbox.*` settings; every API / UI / audit / export / log field masks them (`user:***@`) for every role; only the relay receives the real URL; the workers read the relay |
+| Codecs | 24 H.264 (11 with B-frames: cam07/08/09/10/11/21/24/25/27/28/29) + 6 H.265 (cam06/12/17/18/22/26); mostly 1920×1080, also 1280×720 / 1280×960 / 960×576 / 2560×1440; reported fps unreliable (cam06 `90000/1`) → PTS timing, fps stored only when plausible; 17 re-encode paths |
+| Enrichment | coordinates, district, city, police station, department and camera type are **team-inferred** (`media/cameras_enrichment.csv`, 7 exact / 16 approx / 7 guess) and flagged as such on the map (solid / dashed / hollow markers), in the drawer and in `metadata.enrichment` |
+| Onboarding | 30 fetched / 0 added / 30 updated / 0 duplicates; 82–99 s including an ffprobe of every camera (6 parallel, 45 s cap); first stream 2–5 s; rows first loaded via CSV converted in place (same id, relay path, ANPR flags) |
+| Behaviour of the feeds | looped night recordings (13 June 2026); several sources lose hundreds of RTP packets per second (direct pull: cam01 279 frames/20 s, cam07 28) — the relay reconnects with 2→30 s backoff, transcoders restart, the player restarts its chain; 9/9 wall tiles played (first frame 6–41 s cold), health 31/31 online |
+
+Nothing in the architecture changed for the real feed: the same adapter interface (`SentinelPortalAdapter`, `source='sandbox'`), the same relay paths and the same worker contract; the three defects it exposed (player budgets for cold sources, B-frame H.264 over WebRTC/HLS, transcoder CPU cap) are recorded in `CONTRACT.md` Amendments and `docs/acceptance-log.md`.
 
 ### 5.3 Processing placement
 
@@ -317,7 +332,7 @@ Phase 1 runs the relay and the workers on one VM. At scale (§14 and the Plan fo
 
 ### 5.4 Browser playback sequence
 
-`StreamPlayer`: `GET /api/streams/{id}` → **WHEP** (WebRTC, `POST /mtx/<path>/whep`, 5 s ICE timeout, ICE over UDP or TCP on 8189) → **hls.js** (`/mtx/<path>/index.m3u8`, low-latency, 10 s manifest timeout) → **snapshot mode** (`/media/snapshots/cam_<id>.jpg`, refreshed every second from the worker). The 16-tile wall shows 4 live tiles plus 12 one-second snapshots so that a jury laptop is not asked to decode sixteen 1080p streams.
+`StreamPlayer`: `GET /api/streams/{id}` (play path, `whep_supported`, `ready`) → **WHEP** (WebRTC, `POST /mtx/<path>/whep`; the offer waits up to 45 s when the relay reports `ready=false` because it is still pulling a cold on-demand source — the sandbox answers in 4–38 s — and 10 s when the path is warm; the 5 s ICE budget starts after the answer; ICE over UDP or TCP on 8189) → **hls.js** (`/mtx/<path>/index.m3u8`, low-latency, same manifest budget) → **snapshot mode** (`/media/snapshots/cam_<id>.jpg`, refreshed every second from the worker). A playing session that loses its transport (source gap, transcoder restart) restarts the chain instead of dropping a level. The 16-tile wall shows 4 live tiles plus 12 one-second snapshots so that a jury laptop is not asked to decode sixteen 1080p streams. Measured on the real sandbox: plain H.264 tiles in 6–7 s, H.265 / re-encoded tiles in 15–41 s cold.
 
 ---
 
@@ -457,7 +472,7 @@ flowchart LR
     direction TB
     U1["Toast + sound + bell count + map marker flash"]
     U2["Alert panel sorted by priority then time; Ack / Close with note"]
-    U3["Drawer: crop, camera, mini-map, Play recording, Create clip"]
+    U3["Drawer: crop, camera, mini-map, Play recording, Export clip"]
     U4["Vehicle search → confirm hits → route + timeline → PDF"]
   end
   D2 --> M1
@@ -505,7 +520,9 @@ Indexes: `plate_reads(plate_norm, captured_at)`, trigram GIN on `plate_raw` and 
 
 ### 7.4 User interface
 
-Toast (priority-coloured; critical persists) + sound + bell badge + map marker flash + red dot on the sidebar; alert panel sorted by priority then time with an **escalation badge** when unacknowledged for > 5 min; Ack / Close with note and outcome (`resolved`, `false_positive`, `duplicate`, `other`); detail drawer with crop, full frame, camera card, mini-map, "Play recording" (from 10 s before the read) and "Create clip"; one click to the vehicle's route. `[SCREENSHOT: alert toast + panel]`
+Toast (priority-coloured; critical persists) + sound + bell badge + map marker flash + red dot on the sidebar; alert panel sorted by priority then time with an **escalation badge** when unacknowledged for > 5 min; Ack / Close with note and outcome (`resolved`, `false_positive`, `duplicate`, `other`); detail drawer with crop, full frame, camera card, mini-map, "Play recording" (from 10 s before the read) and "Export clip"; one click to the vehicle's route.
+
+![Alert toast, bell count and the alert panel on the local stack (5 Sept 2026)](screenshots/live/alert-toast.png)
 
 ---
 
@@ -552,9 +569,10 @@ sequenceDiagram
 
 | Stage | Detail | Model / licence |
 |---|---|---|
-| Decode | `ffmpeg -rtsp_transport tcp [-hwaccel cuda] -i rtsp://mediamtx:8554/cam_<id> -vf fps=5,scale=960:-1 -f rawvideo -pix_fmt bgr24 -`; frames dropped (never queued) when inference lags; `-skip_frame nokey` at ~1 fps in pre-index mode | ffmpeg (LGPL/GPL build) |
-| Plate detection | YOLO-v9-t-384 licence-plate detector (ONNX) on the full 960 px frame, conf ≥ 0.4, boxes < 60 px wide skipped; **contour fallback** (bright quadrilaterals, aspect 0.15–0.6, fill ≥ 0.6) used when ONNX returns no box — this reads the synthetic plates on the CPU-only laptop and is a weak fallback on real feeds; the active detector is reported in every heartbeat | open-image-models detector; onnxruntime (MIT) |
-| OCR | Crop upscaled ×3, grayscale + CLAHE; PaddleOCR PP-OCRv4 (det + rec) so **two-line plates** yield two lines joined before normalisation | PaddleOCR / PaddlePaddle (Apache-2.0) |
+| Decode | `ffmpeg -rtsp_transport tcp -timeout 30s [-hwaccel cuda] -i rtsp://mediamtx:8554/cam_<id> -f rawvideo -pix_fmt bgr24 -` at the **native resolution** (`FRAME_WIDTH=0`; the mock profile still scales to 960), time-based loop-safe frame selection at `ANPR_FPS` (2 on the laptop, 5 on a GPU host) without an `ffprobe` dial (stream info parsed from ffmpeg's own stderr), one dial at a time 3 s apart (`DialGate`), 90 s first-frame / 60 s stall watchdog, 2 → 30 s backoff; frames dropped (never queued) when inference lags; `-skip_frame nokey` at ~1 fps in pre-index mode | ffmpeg (LGPL/GPL build) |
+| Plate detection | YOLO-v9-t-384 licence-plate detector (ONNX) run **tiled** (`ANPR_DET_TILE=768` tiles + the whole frame, IoU 0.4 merge) on a 1280 px copy (`ANPR_DETECT_WIDTH`; 1920 on a GPU host), conf ≥ 0.4, boxes < 28 px skipped; a burnt-in OSD mask (top/bottom 8 % bands + static-text regions learnt from 30 s of samples) and a static-box filter drop clocks, captions and signboards; **contour fallback** (bright quadrilaterals) is the mock-loop detector, never used on the real feeds; the active detector is reported in every heartbeat | open-image-models detector; onnxruntime (MIT) |
+| Track + best shot | Every plate box joins a track (IoU ≥ 0.15 / centre distance); the 3 sharpest shots (width × contrast-normalised Laplacian) are kept and OCR runs on settle / regrow / end — a few OCR calls per vehicle instead of one per frame; every ended track is a **detected vehicle** (crop + JSON line in the evidence store, `kind = plate \| vehicle \| text`) | |
+| OCR | **`ANPR_OCR=ensemble`** — PaddleOCR PP-OCRv4 (det + rec, so **two-line plates** yield two lines joined before normalisation) on an enhanced crop (×4 cubic upscale, CLAHE, conservative inversion) **plus** fast-plate-ocr `cct_xs_v2_global` (ONNX, 12–30 ms); agreement wins, else the valid-format string, else the higher confidence ≥ 0.45; letters-only strings are dropped before voting (they are captions, never plates). Chosen on the hand-labelled night crop bank (§8.5): the only backend that read both legible plates in valid format with 0 false plates on 48 signboard/caption crops | PaddleOCR / PaddlePaddle (Apache-2.0); fast-plate-ocr (MIT) |
 | Normalise | Contract §3.4 (above) | shared pure function |
 | Vote | Per (camera, plate bucket) reads kept for 3 s; char-wise majority string with mean confidence; crop of the best member — the single largest accuracy gain | |
 | Sightings | Opened on the first accepted read, extended while reads arrive, closed after 15 s silence; `best_*` track the best read; a loop pass creates a new sighting (truthful) | |
@@ -568,7 +586,7 @@ YOLOX-s COCO (ONNX, Apache-2.0) on every 5th live frame; classes person, bicycle
 
 ### 8.3 Accuracy evidence (delivered)
 
-`GET /reports/quality`: reads, valid-format %, sightings, unique plates, mean confidence, per-camera figures, and a **spot-check accuracy** from operator labels (`qa_labels`, 30 random crops per chosen camera) with exact-match %, character accuracy and a confusion table. Printed as a section of the output report PDF. Target: ≥ 80 % exact on chosen daytime cameras `[MEASURE]`.
+`GET /reports/quality` (`?source=sandbox` restricts it to the government cameras): reads, valid-format %, sightings, unique plates, mean confidence, per-camera figures, and a **spot-check accuracy** from operator labels (`qa_labels`, random crops per chosen camera) with exact-match %, character accuracy and a confusion table. Printed as a section of the output report PDF. Target: ≥ 80 % exact on chosen daytime cameras. **Status in this submission (5 Sept 2026, night footage only):** 20 reads on the organiser cameras were labelled by eye (`docs/anpr-accuracy.md` §5): **7 exact of 20** (35 %; 7 of 12 valid-format reads; character accuracy ≈ 58 %; the confusions seen are 3→1, 2→Z, J→I), every exact read on cam07, the IR forecourt camera whose plates stop in front of the lens. The three false *valid* reads (`SI9E5995`, `GI27EW9901`, `OG9I7515`) all carry a non-existent state code — the syntactic format check of contract §3.4 lets them through and a state-code table is the obvious next filter. No daylight figure exists yet (the loop's daytime half reaches the screen at 01:44 / 13:46 IST on 6 Sept); the ground-truth comparison on the synthetic set (`media/synthetic/plates.json`, anchor plates read exactly on every camera, acceptance checks 12–14) does not transfer to the real feed.
 
 ### 8.4 Roadmap analytics
 
@@ -579,6 +597,15 @@ YOLOX-s COCO (ONNX, Apache-2.0) on every 5th live frame; classes person, bicycle
 | Person / vehicle tracking across cameras | Delivered for vehicles via plate sightings (§10); appearance-based re-identification for persons is roadmap | Re-ID embeddings stored per sighting; cosine search within a time-space window |
 | Crowd density, anomaly detection | Roadmap | Density heat-maps from the person counts already produced; anomaly = statistical deviation from the per-camera hourly baseline |
 | Helmet / triple-riding / wrong-way | Roadmap | Same frame pipeline, additional ONNX heads; alerts through the same channel |
+
+### 8.5 What the government feed taught us (5 Sept 2026, `docs/anpr-accuracy.md`)
+
+- **The footage is a 12 h 02 min loop of the night of 13/14 June 2026** on every organiser camera (burnt-in clocks read at known wall times; daylight reaches the screen at 01:44 and 13:46 IST on 6 Sept). Every figure in this submission is night footage: 24 street-lit colour cameras on which the retro-reflective plate is a blown-out white blob, 6 IR cameras.
+- **Plates are 25–110 px wide at 1080p** on wide-angle junction presets (no dedicated ANPR lane camera). Below ≈ 60 px no backend reads anything; the 960 px whole-frame path of the mock profile found 27 boxes in the survey where the tiled native-resolution path found 43 real plates plus 45 signboard / caption boxes. Hence native decode + tiled detection + OSD mask in the live profile.
+- **Most detector boxes at night are text that is not a plate** — 48 of the 71 widest crops of the bank were a Gujarati shop sign, `GUJARAT POLICE`, a `Bhavani` caption or the camera OSD. PaddleOCR returns their letters at 0.9+; the digit rule and the `text` track kind keep them out of reads and out of the detected-vehicle evidence.
+- **Backend comparison on the hand-labelled bank** (2 legible plates, 48 negatives): PaddleOCR det+rec 1 exact / 0.89 char accuracy / 0 false; fast-plate `cct_xs_v2` 1 exact / 0.94 / 0 false at 30 ms; `vit_v2` 0; the chosen **ensemble** 2 valid-format reads / 0.94 / 0 false at ≈ 200–470 ms per call, affordable because best-shot tracking keeps OCR at 2–3 calls per minute per camera.
+- **Live yield at night**: in the final 20-minute window (16:20–16:40 UTC) the 8 live cameras produced 50 detected vehicles (33 with a plate box ≥ 60 px), 11 OCR reads, 4 in valid format, 1 correct by eye; over the evening (20:31–22:12 IST) cam07 alone produced 7 confirmed plates. Detected vehicles with timestamped crops are therefore the main evidence the report shows; plates are the stronger evidence where the camera allows them.
+- **Reliability on real feeds is a separate problem from accuracy**: the organiser server answers `DESCRIBE` in 4–38 s, refuses bursts of dials, loses packets on ten feeds and was down for 8 minutes on 5 Sept; the worker's one-dial-at-a-time gate, no-probe dial, stall watchdog and backoff reset (§7 of the contract) turned a reconnect storm (150 restarts/hour) into 0 kills and 0 API timeouts over the measured windows.
 
 ---
 
@@ -699,19 +726,19 @@ Retention is per department policy and configurable per camera (`retention_days`
 
 | Control | Implementation |
 |---|---|
-| Transport | HTTPS/WSS only through Caddy with automatic Let's Encrypt (HTTP → HTTPS redirect is Caddy's default); `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Server` header removed (`deploy/Caddyfile` `security_headers` snippet). HSTS is **not** emitted yet — see the gap list below |
-| Authentication | Username/password (bcrypt cost 12); JWT HS256, 8 h, `jti`; login rate-limited per IP (10/min → 429); HttpOnly `sg_session` cookie (Path=/, SameSite=Lax, Secure on HTTPS) set at login so that `<img>`, `<video>`, HLS and WHEP requests, which cannot carry a Bearer header, can authenticate; the API accepts it on any route (SameSite=Lax bounds the CSRF exposure); logout clears it |
+| Transport | HTTPS/WSS only through Caddy with automatic Let's Encrypt (HTTP → HTTPS redirect is Caddy's default). `deploy/Caddyfile` `security_headers` snippet on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`, `Server` header removed; **`Strict-Transport-Security: max-age=31536000; includeSubDomains` on the TLS site** (matcher `protocol https`, so the plain-HTTP laptop address does not pin HSTS on `localhost`); the SPA document carries a **Content-Security-Policy** (`spa_csp` snippet: `default-src 'self'`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'self'`, `img-src` limited to same-origin, `data:`/`blob:` and OSM tiles, `connect-src 'self' ws: wss:`). Verify with `curl -I https://<host>/` (HSTS + CSP) and `curl -I http://localhost/` (CSP, no HSTS) |
+| Authentication | Username/password (bcrypt cost 12, unknown usernames verified against a dummy hash so response time does not reveal accounts); JWT HS256, 8 h, `jti` + `iat`; **sessions are invalidated by `users.token_not_before`** — an admin password reset, deactivation, role/scope change or the user's own password change rejects every JWT issued before it; login rate-limited **per IP (10/min → 429) and per username (5 failed attempts → 15 min lock)**, a successful login clears only that account's failure counter, never the IP window; HttpOnly `sg_session` cookie (Path=/, SameSite=Lax, Secure on HTTPS) set at login so that `<img>`, `<video>`, HLS and WHEP requests, which cannot carry a Bearer header, can authenticate (SameSite=Lax bounds the CSRF exposure); `?token=` is honoured only on `/ws/*` and `/media/*` (and by the media `forward_auth`), never on REST routes, and Caddy's JSON access log redacts it; logout clears the cookie |
 | Authorisation | Permission matrix enforced by a FastAPI dependency; department/district scoping in SQL; scoped misses return 404 |
-| Media protection | `/mtx/*` and `/playback/*` guarded by Caddy `forward_auth` → `GET /api/auth/verify`; `/media/*` served by the API with per-role scoping, path normalisation and prefix allow-list |
-| Machine access | API keys `sk_…` (SHA-256 stored, shown once, scoped `bulk` or `internal`, deactivatable); every `/api/internal/*` route requires an `internal`-scoped key (`require_api_key`) and is reachable through Caddy only with it; the worker posts inside the Compose network; the seeded default `INTERNAL_API_KEY` must be rotated (`deploy.sh` flags it) |
-| Secrets | `.env` only; masked in `GET /settings` (`********`, unchanged on PUT); `deploy.sh` prints a loud WARNING with the rotation commands for every secret and seed password still equal to its default (it warns and continues; it does not abort) |
+| Media protection | `/mtx/*` and `/playback/*` guarded by Caddy `forward_auth` → `GET /api/auth/verify`; `/media/*` served by the API with per-role scoping, path normalisation and prefix allow-list; `GET /evidence/verify` answers 404 for any path that is not an in-scope ledger row (an admin may pass `any=1` to hash an unledgered file), so the media route and the verify route agree about what a scoped user can learn; MediaMTX's control API (`:9997`) and playback (`:9996`) are bound to loopback regardless of `MTX_BIND` |
+| Machine access | API keys `sk_…` (SHA-256 stored, shown once, scoped `bulk` or `internal`, deactivatable); every `/api/internal/*` route requires an `internal`-scoped key (`require_api_key`) **and Caddy answers 404 for `/api/internal/*` from the Internet** (`@internal` handle in `deploy/Caddyfile`), so the worker ingestion routes exist only inside the Compose network where the ANPR workers post to `api:8000` directly; a leaked or default `INTERNAL_API_KEY` cannot be used from outside. `/v1/cameras/bulk` (scope `bulk`) is the only key-authenticated route exposed through Caddy. Verify: `curl -I https://<host>/api/internal/heartbeat` → 404 |
+| Secrets | `.env` only; masked in `GET /settings` (`********`, unchanged on PUT). `deploy/deploy.sh` generates `POSTGRES_PASSWORD`, `JWT_SECRET`, `INTERNAL_API_KEY` and `BULK_API_KEY` for a fresh `.env`, and on a public (`--domain`) deployment **aborts** when any of those four is still the repository default; the API itself refuses to start (`FATAL: refusing to start a public deployment with default secrets`, `config.py` `_guard_default_secrets`) when `COOKIE_SECURE=1` or `PUBLIC_BASE_URL` is `https://` and `JWT_SECRET` or `POSTGRES_PASSWORD` is the default. The two API keys and the four seed passwords (`JURY_*_PASSWORD`, `DEPT_ADMIN_PASSWORD`) are **warned about, not refused**, when a public deployment still carries their published defaults: the API prints a banner at every start and reports them in `/healthz` (`default_secrets_in_use`), and the default `BULK_API_KEY` is **seeded inactive** on a public deployment so the documented key cannot be used against the hosted URL; `deploy.sh --domain` repeats the warning for the passwords. The hosted demo needs the values typed into the portal form, so the operator sets them before the URL is shared |
 | Audit | Append-only `audit_log` with DB trigger; every mutation and every sensitive read |
 | CORS | Locked to the site origin (`CORS_ORIGINS`) |
 | Input validation | Pydantic on every body/query; CSV size and row caps; multipart caps (200 MB CSV, 50 MB internal batch); path-traversal checks; codec/enum whitelists; SQL via parameters only |
-| Availability | `restart: unless-stopped`; healthchecks on every service; `/healthz`; nightly `pg_dump`; VM snapshot before submission |
+| Availability | `restart: unless-stopped` on every service; Docker healthchecks on `postgres` (`pg_isready`), `mediamtx` (control API), `api` (`GET /healthz`) and `web` (Caddy → `api:8000/healthz` through the container-internal `:8080` site); the ANPR workers have **no Docker healthcheck** — their liveness is the heartbeat they post every few seconds (`/api/internal/heartbeat`), surfaced as `anpr_workers` in `/healthz` and as "Running / Not responding" on the Health page (a worker whose heartbeat is older than 3 × `HEARTBEAT_S` is flagged stale). Nightly `pg_dump`: `deploy/backup.sh --install-cron`, installed by `deploy.sh` on a `--domain` deployment (`--no-cron` skips it); VM snapshot before submission |
 | At scale (Plan for Scale §7) | Keycloak SSO with MFA, mTLS between tiers, HSM-backed key management, network segmentation (camera VLANs, relay DMZ, core), WAF, SIEM, vulnerability management, at-rest encryption (LUKS / SSE) |
 
-**Known gaps in this submission (Phase 2 work, none on the demo path):** `Strict-Transport-Security` (HSTS) is not set by `deploy/Caddyfile`; the `sg_session` cookie is not path-restricted to the media routes; the JWT `jti` is issued but there is no revocation list, so a token stays valid until its 8 h expiry; the default `INTERNAL_API_KEY` / `BULK_API_KEY` and seed passwords are warned about by `deploy.sh`, not refused. Each is a one-line change and is verifiable with `curl -I` / a cookie-only request against the hosted URL.
+**Known gaps in this submission (Phase 2 work, none on the demo path):** the `sg_session` cookie is set with `Path=/` rather than restricted to the media routes (SameSite=Lax bounds the CSRF exposure); there is no per-token revocation list — logout deletes the cookie and a token is rejected only when the account's `token_not_before` moves (password change/reset, deactivation, role change), otherwise it lives until its 8 h expiry; the seed passwords and API keys are warned about on a public deployment, not refused (the DB password and JWT secret *are* refused, see the Secrets row); the login limiter is process-local (reset by an API restart; a shared store is a Plan-for-Scale item); `style-src 'unsafe-inline'` and `script-src-attr 'unsafe-inline'` remain in the CSP for Ant Design's CSS-in-JS and one inline `onerror` handler; map tiles are fetched from OpenStreetMap by the browser (self-hosted tiles are a Plan-for-Scale item); secret settings (catalogue password, Telegram token, webhook secrets) are stored as plain rows in `settings`, masked only in the API — a database dump therefore contains them, which is why `deploy/backup.sh` writes dumps with `umask 077` into a `0700` directory and encrypts them (AES-256, `openssl enc -pbkdf2`) when `BACKUP_PASSPHRASE` is set; encryption at rest of those rows is a Plan-for-Scale item. Each is verifiable with `curl -I` / a cookie-only request against the hosted URL.
 
 ---
 
@@ -813,9 +840,9 @@ Design rule: every external system sits behind `ExternalLookupAdapter.lookup(key
 
 | Concern | How it is handled | Detail in `PHASE2-RUNBOOK.md` |
 |---|---|---|
-| New camera environment on the day | **Settings → Catalogue**: host, auth, field map → "Test connection" reports mapped/unmapped fields → "Import from catalogue"; **CSV fallback** if the on-site catalogue differs in shape; measured onboarding time shown in the import summary | 5-minute onboarding drill, timed |
-| Live ANPR on all cameras | `anpr-live` on all ~50 cameras at keyframe rate split across the cloud VM (T4: 20–30 NVDEC streams) and a GPU laptop (RTX: 10–16) with `ANPR_CAMERAS`; 8–12 road-facing cameras at 5 fps | Sizing table and split procedure |
-| The designated plate | Vehicle search over live sightings within seconds of a read; pre-index if the sandbox loop is reused; fuzzy candidates with crops and operator confirmation rather than a claimed exact match | Jury-question → screen map |
+| New camera environment on the day | **Settings → Catalogue**: the source selector already knows the organiser sandbox (`sentinel_portal`: relay host, e-mail + access password, `cameras.json` upload or portal login, enrichment CSV upload, "Test cam01") — done in six steps on 5 Sept 2026 (README §4.1), 30 cameras in 82–99 s including a probe of each; a differently shaped catalogue uses the generic `/api/ingest` source (host, auth, field map → "Test connection" → "Import from catalogue") or the **CSV fallback**; the measured onboarding time is in the import summary | 5-minute onboarding drill, timed |
+| Live ANPR on all cameras | the sandbox has **30** cameras: 8 on the CPU laptop at 1 fps with tiled detection (cam01/02/04/05/07/12/14/16, chosen by the readability survey in `docs/anpr-camera-selection.md`), 12 on a T4-class VM at 5 fps (+ cam08/13/15/30), the other 18–22 on the pre-index worker at keyframe rate; a GPU laptop (RTX: 10–16 NVDEC streams) takes a slice with `ANPR_MAX_CAMERAS` / lowest-id assignment | Sizing table and split procedure |
+| The designated plate | Vehicle search over live sightings within seconds of a read; pre-index if the sandbox loop is reused; fuzzy candidates with crops and operator confirmation rather than a claimed exact match. Known from the sandbox: the footage is a looped night recording with 25–110 px plates, so the worker runs at native resolution with 768 px tiles and `ANPR_MIN_PLATE_W=40`, static overlays (burnt-in clocks, camera names) are suppressed, and the pitch states the measured read rate rather than a guess | Jury-question → screen map |
 | Connectivity at the venue | WebRTC → HLS fallback; TCP ICE on 8189; 4G/5G hotspot; full stack offline on the laptop with fallback clips (`fallback_<id>` paths) | Kit list |
 | Evidence on the day | Route PDF in < 60 s from plate entry; import summary with onboarding time; analytics-quality page; measured read → alert latency | Pitch script |
 
@@ -866,7 +893,7 @@ Design rule: every external system sits behind `ExternalLookupAdapter.lookup(key
 
 Nothing claimed in the presentation or videos is outside the "Live" column.
 
-Known licence item: the React map wrapper `react-leaflet` is published under the Hippocratic License 2.1 (source-available, not OSI-approved); Leaflet itself is BSD. It is replaceable by direct Leaflet hooks with no visible change and the decision is recorded in `LICENCES.md` note A.
+Licence position: every runtime component is under an OSI-approved licence (`LICENCES.md`). The React map layer uses Leaflet (BSD-2-Clause) through in-repo bindings (`frontend/src/components/leaflet.tsx`, MIT, ours); `react-leaflet` (Hippocratic License 2.1, not OSI-approved) is not a dependency.
 
 ---
 

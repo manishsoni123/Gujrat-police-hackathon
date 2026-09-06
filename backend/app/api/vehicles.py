@@ -41,7 +41,7 @@ async def search(
     t_from, t_to = parse_window(from_, to, cfg.get_int("route.default_window_h"))
     await serializers.warm(db)
     res = await plate_search.search(db, norm.plate_norm, t_from, t_to, user_scope(user), camera_id, department_id, limit)
-    set_audit(request, action="vehicle.search", entity="plate", entity_id=norm.plate_norm, after={"q": q, "normalised": norm.plate_norm, "exact": len(res["exact"]), "fuzzy": len(res["fuzzy"])})
+    set_audit(request, action="vehicle.search", entity="plate", entity_id=norm.plate_norm, after={"q": q, "normalised": norm.plate_norm, "exact": len(res["exact"]), "fuzzy": len(res["fuzzy"]), "exact_total": res["exact_total"], "fuzzy_total": res["fuzzy_total"]})
     return {"query": {"raw": q, "normalised": norm.plate_norm, "is_valid_format": norm.is_valid_format, "from": iso_z(t_from), "to": iso_z(t_to)}, **res}
 
 

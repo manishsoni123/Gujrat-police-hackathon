@@ -28,7 +28,10 @@ udpMaxPayloadSize: 1472
 #
 # Every port except 8189 (ICE) is reachable only inside the compose network
 # or through Caddy, which guards /mtx/* and /playback/* with forward_auth to
-# the API (CONTRACT §2.5). MediaMTX itself therefore allows everything.
+# the API (CONTRACT §2.5). MediaMTX itself therefore allows everything. The
+# compose file keeps the control API (9997, path add/delete with runOn*
+# commands) and the playback server (9996) on 127.0.0.1 even when MTX_BIND
+# opens RTSP/WHEP/HLS to a LAN, because `any` below has no password.
 
 authMethod: internal
 authInternalUsers:
@@ -132,13 +135,24 @@ webrtcTrackGatherTimeout: 2s
 # NOTE (amendment to CONTRACT §8.2): `sourceOnDemand: yes` must NOT be set
 # here. MediaMTX v1.20.1 treats it as a fatal configuration error when the
 # default source is `publisher` ("'sourceOnDemand' is useless when source is
-# 'publisher'"). The API sets sourceOnDemand=true explicitly on every
-# cam_<id> path it creates (§8.3 JSON), so the behaviour is unchanged.
+# 'publisher'"). The API sets sourceOnDemand explicitly on every cam_<id>
+# path it creates (§8.3 JSON).
+#
+# Relay-source policy (CONTRACT Amendments 2026-09-05, "pace your load"):
+# the API keeps ONE upstream connection per camera that is actually
+# processed - anpr_enabled cameras and the own gate get `sourceOnDemand: no`
+# (MediaMTX reconnects them itself; v1.20.1 retries a failed static source
+# every fixed 5 s, `retryPause` in internal/staticsources/handler.go, there
+# is no path-level knob) - and every other camera stays on demand with a
+# 10-minute close-after (below and in the §8.3 JSON) so a wall viewer or a
+# health probe does not re-dial the organiser server every minute. The API
+# applies/repairs the policy through /v3/config/paths/patch (no MediaMTX
+# restart), spacing dial-inducing changes 3 s apart.
 
 pathDefaults:
   source: publisher
   sourceOnDemandStartTimeout: 15s
-  sourceOnDemandCloseAfter: 60s
+  sourceOnDemandCloseAfter: 600s
   maxReaders: 0
   rtspTransport: tcp
   record: no
@@ -193,11 +207,12 @@ paths:
     runOnInitRestart: yes
 
   # Our own "private society camera" (V3 / Video 1). Uses the team's phone
-  # video when present, otherwise falls back to synthetic camera 1 so the
-  # path is always demoable. Registered manually as external_id OWN-GATE-01,
+  # video when present, then the generator's own_gate.mp4 (CONTRACT §12.4,
+  # shares exactly two plates with cameras 1-3), then synthetic camera 1 so
+  # the path is always demoable. Registered manually as external_id OWN-GATE-01,
   # rtsp_url rtsp://mediamtx:8554/own_gate. Recorded like an ANPR camera.
   own_gate:
-    runOnInit: sh -c 'until [ -f /media/own/own_gate.mp4 ] || [ -f /media/synthetic/cam_1.mp4 ]; do sleep 10; done; if [ -f /media/own/own_gate.mp4 ]; then exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/own/own_gate.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/own_gate; else exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_1.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/own_gate; fi'
+    runOnInit: sh -c 'until [ -f /media/own/own_gate.mp4 ] || [ -f /media/synthetic/own_gate.mp4 ] || [ -f /media/synthetic/cam_1.mp4 ]; do sleep 10; done; if [ -f /media/own/own_gate.mp4 ]; then exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/own/own_gate.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/own_gate; elif [ -f /media/synthetic/own_gate.mp4 ]; then exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/own_gate.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/own_gate; else exec ffmpeg -nostdin -loglevel error -re -stream_loop -1 -i /media/synthetic/cam_1.mp4 -c copy -an -rtsp_transport tcp -f rtsp rtsp://localhost:8554/own_gate; fi'
     runOnInitRestart: yes
     record: yes
 

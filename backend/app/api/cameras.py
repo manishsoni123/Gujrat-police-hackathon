@@ -87,6 +87,12 @@ class CameraFilters:
         return {k: v for k, v in self.__dict__.items() if v not in (None, False, "")}
 
 
+def serializers_merge_meta(current: dict[str, Any] | None, incoming: dict[str, Any] | None) -> dict[str, Any] | None:
+    from app.services.camera_importer import merged_metadata
+
+    return merged_metadata(current, incoming)
+
+
 async def uptime_map(db: AsyncSession, camera_ids: list[int]) -> dict[int, float]:
     if not camera_ids:
         return {}
@@ -214,6 +220,13 @@ async def update_camera(camera_id: int, body: CameraUpdate, user: CurrentUser, d
     await serializers.warm(db)
     before = serializers.camera_diff(cam)
     data = body.model_dump(exclude_unset=True)
+    # URL credentials are masked in every response, so an edit form echoes `rtsp://user:***@host/...`; that
+    # spelling means "unchanged" and must never overwrite the stored secret (CONTRACT Amendments 2026-09-05).
+    for url_field in ("rtsp_url", "whep_url", "hls_url"):
+        if url_field in data and serializers.is_masked_form(data[url_field], getattr(cam, url_field)):
+            data.pop(url_field)
+    if "metadata" in data:
+        data["metadata"] = serializers_merge_meta(cam.meta, data["metadata"])
     new_dept_id: int | None = None
     if "department_id" in data or "department_code" in data:
         if not can_change_department(user.role):
@@ -245,10 +258,11 @@ async def update_camera(camera_id: int, body: CameraUpdate, user: CurrentUser, d
         new = getattr(parsed, k, None) if hasattr(parsed, k) else data[k]
         if k in ("type", "ownership", "codec", "maintenance_status") and new is None:
             continue
-        if getattr(cam, k) != new:
+        attr = "meta" if k == "metadata" else k
+        if getattr(cam, attr) != new:
             if k in ("rtsp_url", "codec", "record_enabled", "anpr_enabled"):
                 relay_changed = True
-            setattr(cam, k, new)
+            setattr(cam, attr, new)
     if new_dept_id is not None and cam.department_id != new_dept_id:
         cam.department_id = new_dept_id
     if "external_id" in data and data["external_id"] != before["external_id"]:

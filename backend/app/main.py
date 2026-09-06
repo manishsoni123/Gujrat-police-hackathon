@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
@@ -53,6 +53,7 @@ from app.api import (
     ws,
     zones,
 )
+from app.api.deps import require_api_key
 from app.core.audit_middleware import AuditMiddleware
 from app.core.config import settings
 from app.core.errors import install_exception_handlers
@@ -202,6 +203,9 @@ def create_app() -> FastAPI:
     app.include_router(healthz.router, prefix="/api")
     # the organiser-shaped catalogue is also reachable at the root so that SANDBOX_BASE_URL=http://api:8000/mock-sandbox works inside the compose network
     app.include_router(mock_sandbox.router, include_in_schema=False)
+    # webhook sink: open at the root (compose network only), internal-API-key gated under /api (Caddy-exposed)
+    app.include_router(mock_sandbox.sink_router, include_in_schema=False)
+    app.include_router(mock_sandbox.sink_router, prefix="/api", dependencies=[Depends(require_api_key("internal"))])
     app.include_router(healthz.router)
     app.include_router(ws.router)
     app.include_router(media.router)

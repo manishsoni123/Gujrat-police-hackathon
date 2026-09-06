@@ -17,7 +17,10 @@ from app.services.mediamtx_client import play_path, relay_path
 from app.services.plates import format_plate
 
 RECORDING_RETENTION_H = 12
-_CRED_RE = re.compile(r"^(rtsps?://[^:/@]+:)[^@]*(@)")
+# scheme :// authority rest — the authority may carry `user:password@` (password may itself contain `@`, `:`; the
+# organiser sandbox uses a percent-encoded e-mail as the user).
+_URL_RE = re.compile(r"^([a-z][a-z0-9+.\-]*://)([^/?#]*)(.*)$", re.I | re.S)
+MASKED_PASSWORD = "***"
 
 EVENT_LABELS = {
     "accident": "Accident", "suspicious": "Suspicious activity", "checkpoint": "Checkpoint",
@@ -36,10 +39,58 @@ async def warm(db: AsyncSession) -> None:
     await lookups.usernames(db)
 
 
-def mask_rtsp(url: str | None, is_admin: bool) -> str | None:
-    if not url or is_admin:
+def mask_url(url: str | None) -> str | None:
+    """`scheme://user:secret@host/...` → `scheme://user:***@host/...` for any scheme (rtsp, rtsps, http, https, …).
+
+    The password never leaves the API (CONTRACT Amendments 2026-09-05, organiser sandbox): responses, CSV exports,
+    audit before/after diffs, import summaries and probe errors all pass through here. A URL without a password
+    (`rtsp://host/...`, `http://user@host/...`) is returned unchanged.
+    """
+    if not url:
         return url
-    return _CRED_RE.sub(r"\1***\2", url)
+    m = _URL_RE.match(url)
+    if not m:
+        return url
+    scheme, authority, rest = m.groups()
+    if "@" not in authority:
+        return url
+    userinfo, hostport = authority.rsplit("@", 1)
+    if ":" not in userinfo:
+        return url
+    user = userinfo.split(":", 1)[0]
+    return f"{scheme}{user}:{MASKED_PASSWORD}@{hostport}{rest}"
+
+
+def mask_rtsp(url: str | None, is_admin: bool = False) -> str | None:
+    """Kept for callers of the old signature: credentials are masked for **every** role now (`is_admin` is ignored)."""
+    return mask_url(url)
+
+
+def is_masked_form(candidate: str | None, stored: str | None) -> bool:
+    """True when `candidate` is the masked rendering of `stored` (an edit form echoing the value it was shown):
+    the caller then keeps the stored URL instead of overwriting the secret with `***`."""
+    if not candidate or not stored:
+        return False
+    return candidate == mask_url(stored) and candidate != stored
+
+
+def mask_secrets_in_text(text: str | None, secrets: list[str] | tuple[str, ...] = ()) -> str | None:
+    """Scrub a free-text error (ffprobe/httpx output) of URL passwords and of the given secret strings
+    (plain and percent-encoded spellings)."""
+    if not text:
+        return text
+    from urllib.parse import quote
+
+    out = re.sub(r"([a-z][a-z0-9+.\-]*://[^\s/:@]+:)[^\s@]*@", r"\1" + MASKED_PASSWORD + "@", text, flags=re.I)
+    for s in secrets:
+        if not s:
+            continue
+        # plain, minimally encoded (ffmpeg/httpx echo the URL as given) and fully encoded (every byte as %XX)
+        spellings = {s, quote(s, safe=""), quote(s), "".join(f"%{b:02X}" for b in s.encode("utf-8")), "".join(f"%{b:02x}" for b in s.encode("utf-8"))}
+        for spelling in sorted(spellings, key=len, reverse=True):
+            if spelling:
+                out = out.replace(spelling, MASKED_PASSWORD)
+    return out
 
 
 def amc_status(expiry: date | None, today: date | None = None) -> str:
@@ -95,11 +146,11 @@ def camera_full(c: Camera, is_admin: bool = False, uptime_24h_pct: float | None 
         "district": c.district,
         "police_station": c.police_station,
         "ward": c.ward,
-        "rtsp_url": mask_rtsp(c.rtsp_url, is_admin),
-        "whep_url": c.whep_url,
-        "hls_url": c.hls_url,
+        "rtsp_url": mask_url(c.rtsp_url),
+        "whep_url": mask_url(c.whep_url),
+        "hls_url": mask_url(c.hls_url),
         "relay_path": c.relay_path,
-        "play_path": play_path(c.id, c.codec) if c.rtsp_url else None,
+        "play_path": play_path(c.id, c.codec, c.meta) if c.rtsp_url else None,
         "codec": c.codec,
         "resolution": c.resolution,
         "fps": c.fps,
@@ -128,6 +179,8 @@ def camera_full(c: Camera, is_admin: bool = False, uptime_24h_pct: float | None 
         "amc_expiry": c.amc_expiry.isoformat() if c.amc_expiry else None,
         "amc_status": amc_status(c.amc_expiry),
         "age_years": age_years(c.install_date),
+        "location_confidence": c.location_confidence,
+        "metadata": c.meta,
         "uptime_24h_pct": uptime_24h_pct,
         "created_by": c.created_by,
         "created_by_username": lookups.username_sync(c.created_by),
@@ -145,13 +198,15 @@ def camera_diff(c: Camera) -> dict[str, Any]:
         "police_station", "ward", "rtsp_url", "codec", "resolution", "fps", "live", "storage_location",
         "retention_days", "install_date", "vendor", "model", "heading_deg", "fov_deg", "connectivity_type",
         "bandwidth_kbps", "vms_platform", "nvr_id", "anpr_enabled", "record_enabled", "status",
-        "maintenance_status", "maintenance_note", "amc_vendor", "amc_expiry",
+        "maintenance_status", "maintenance_note", "amc_vendor", "amc_expiry", "location_confidence",
     )
     out: dict[str, Any] = {}
     for k in keys:
         v = getattr(c, k)
         if isinstance(v, (date, datetime)):
             v = v.isoformat()
+        if k in ("rtsp_url", "whep_url", "hls_url"):
+            v = mask_url(v)  # the audit log stores masked URLs only
         out[k] = v
     return out
 

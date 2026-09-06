@@ -352,7 +352,9 @@ export function AppLayout() {
             <WsStatusDot />
             <IstClock />
             <Tooltip title={soundOn ? 'Alert sound on' : 'Alert sound off'}>
-              <Button type="text" icon={<SoundOutlined style={{ color: soundOn ? '#1E4DB7' : '#9CA3AF' }} />} onClick={() => setSoundOn(!soundOn)} aria-label="Toggle alert sound" />
+              <Button type="text" icon={<SoundOutlined style={{ color: soundOn ? '#1E4DB7' : '#9CA3AF' }} />} onClick={() => setSoundOn(!soundOn)} aria-label="Alert sound" aria-pressed={soundOn} style={{ paddingInline: 8 }}>
+                <span style={{ fontSize: 12, color: soundOn ? '#1E4DB7' : '#6B7280' }}>{soundOn ? 'Sound on' : 'Sound off'}</span>
+              </Button>
             </Tooltip>
             <NotificationBell />
             <Dropdown menu={userMenu} trigger={['click']} placement="bottomRight">

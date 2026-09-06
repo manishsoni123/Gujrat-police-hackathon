@@ -29,3 +29,10 @@ matplotlib==3.9.2
 protobuf==4.25.5
 # tests
 pytest==8.3.3
+# fast-plate-ocr plate recogniser (MIT; anpr/ocr.py FastPlateOCR). Its numpy / opencv-headless / pyyaml / tqdm are the
+# pins above; rich (+ markdown-it-py, mdurl, pygments) is what it imports at run time
+fast-plate-ocr==1.1.0
+rich==13.9.4
+markdown-it-py==3.0.0
+mdurl==0.1.2
+pygments==2.18.0

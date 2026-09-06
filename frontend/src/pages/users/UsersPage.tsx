@@ -5,7 +5,7 @@ import { Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, m
 import type { ColumnsType } from 'antd/es/table';
 import { EditOutlined, KeyOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
-import { useListQuery } from '@/hooks/useListQuery';
+import { rowProps, useListQuery } from '@/hooks/useListQuery';
 import { usersApi } from '@/api';
 import { ApiError } from '@/api/client';
 import type { Role, UserInput, UserRow } from '@/api/types';
@@ -197,7 +197,7 @@ export function UsersPage() {
         ) : empty ? (
           <EmptyState title="No users match" description="Clear the filters or create a user." />
         ) : (
-          <Table<UserRow> className="sg-table" size="middle" rowKey="id" columns={columns} dataSource={list.items} loading={list.query.isLoading} pagination={list.pagination} onChange={list.onTableChange} rowClassName={(u) => (!u.is_active ? 'sg-row-retired' : '')} onRow={(u) => ({ onClick: () => setModal({ open: true, user: u }) })} />
+          <Table<UserRow> className="sg-table" size="middle" rowKey="id" columns={columns} dataSource={list.items} loading={list.query.isLoading} pagination={list.pagination} onChange={list.onTableChange} rowClassName={(u) => (!u.is_active ? 'sg-row-retired' : '')} onRow={(u) => rowProps(() => setModal({ open: true, user: u }))} />
         )}
       </Card>
       <UserModal open={modal.open} user={modal.user} onClose={() => setModal({ open: false, user: null })} />

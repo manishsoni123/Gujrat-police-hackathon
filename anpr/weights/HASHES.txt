@@ -5,3 +5,11 @@
 # anpr/detector.py build_detector and anpr/pipeline.py before each ONNX session is created).
 888397b96d761c89db40bc9c305838e8652660f5e282c2cadebbe8d2951a77a8  yolo-v9-t-384-license-plates-end2end.onnx  https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-t-384-license-plates-end2end.onnx  MIT (open-image-models)
 c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063  yolox_s.onnx  https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx  Apache-2.0 (Megvii YOLOX)
+# fast-plate-ocr recogniser models (MIT, https://github.com/ankandrew/fast-plate-ocr; weights released at ankandrew/cnn-ocr-lp).
+# The .yaml next to each .onnx is the model's input/alphabet config that fast_plate_ocr.LicensePlateRecognizer reads.
+e2fe5946c02e73901f73d21b3b7223a0c3e3b02059d4964fbf279b01af38d63c  global_mobile_vit_v2_ocr.onnx  https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/global_mobile_vit_v2_ocr.onnx  MIT (fast-plate-ocr)
+202b90f2a1f3a0d486b8f1fbd5cdc2f19f4f4881a094f086b983976ed3108aaf  global_mobile_vit_v2_ocr_config.yaml  https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/global_mobile_vit_v2_ocr_config.yaml  MIT (fast-plate-ocr)
+384bbbd2cea3ef54761d3df70822ef3a349ee1a112aeafddbe0e3ba06bc6e47b  cct_s_v2_global.onnx  https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/cct_s_v2_global.onnx  MIT (fast-plate-ocr)
+0335c74a305173bb6f393efed0fde03cadeaa0b649ed8e19f431016d8232d0a6  cct_s_v2_global_plate_config.yaml  https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/cct_s_v2_global_plate_config.yaml  MIT (fast-plate-ocr)
+8031afb5fdc6b4d80462c9d542f1284ebd2cfddf5dbacd62609848d7e2855f44  cct_xs_v2_global.onnx  https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/cct_xs_v2_global.onnx  MIT (fast-plate-ocr)
+0335c74a305173bb6f393efed0fde03cadeaa0b649ed8e19f431016d8232d0a6  cct_xs_v2_global_plate_config.yaml  https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/cct_xs_v2_global_plate_config.yaml  MIT (fast-plate-ocr)

@@ -10,11 +10,18 @@ from anpr.weights.download import WeightStatus, ensure_weight, read_specs, verif
 LEDGER = Path(download.HASHES_FILE)
 
 
-def test_ledger_lists_both_models_with_licences():
+def test_ledger_lists_every_model_with_licences():
     specs = {s.name: s for s in read_specs(LEDGER)}
-    assert set(specs) == {"yolo-v9-t-384-license-plates-end2end.onnx", "yolox_s.onnx"}
+    assert set(specs) == {
+        "yolo-v9-t-384-license-plates-end2end.onnx", "yolox_s.onnx",
+        # fast-plate-ocr recogniser models + their input/alphabet configs (anpr/ocr.py FastPlateOCR)
+        "global_mobile_vit_v2_ocr.onnx", "global_mobile_vit_v2_ocr_config.yaml",
+        "cct_s_v2_global.onnx", "cct_s_v2_global_plate_config.yaml",
+        "cct_xs_v2_global.onnx", "cct_xs_v2_global_plate_config.yaml",
+    }
     for spec in specs.values():
         assert len(spec.sha256) == 64 and spec.url.startswith("https://") and spec.licence
+    assert all("MIT" in specs[n].licence for n in specs if "global" in n), "fast-plate-ocr models are MIT"
 
 
 def test_verify_missing_unlisted_mismatch_verified(tmp_path):

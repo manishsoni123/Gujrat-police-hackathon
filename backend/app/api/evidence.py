@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbDep, require_permission, user_scope
-from app.core.errors import validation_error
+from app.core.errors import not_found, validation_error
 from app.core.hashing import abs_path, safe_relative, sha256_file
 from app.core.tz import iso_z, utcnow
 from app.db.models import Alert, Clip, Event, PlateRead, ReportFile, Sighting
@@ -39,11 +39,15 @@ async def _lookup(db, scope, rel: str) -> tuple[str | None, int | None, str | No
 
 
 @router.get("/evidence/verify")
-async def verify(user: CurrentUser, db: DbDep, request: Request, path: str = Query(..., min_length=1)):
+async def verify(user: CurrentUser, db: DbDep, request: Request, path: str = Query(..., min_length=1), any_file: bool = Query(False, alias="any", description="admin only: verify a file that is not in the evidence ledger")):
     rel = safe_relative(path)
     if rel is None:
         raise validation_error("Invalid path", [{"field": "path", "message": "must be a relative path under the data directory"}])
     entity, entity_id, stored = await _lookup(db, user_scope(user), rel)
+    if entity is None and not (any_file and user.role == "admin"):
+        # same answer as /media for a path outside the caller's scope or not in the ledger: no existence/size/hash oracle
+        set_audit(request, action="evidence.verify", entity="file", entity_id=rel[:64], after={"path": rel, "found": False})
+        raise not_found("Not found")
     p = abs_path(rel)
     exists = p.is_file()
     computed = sha256_file(p) if exists else None

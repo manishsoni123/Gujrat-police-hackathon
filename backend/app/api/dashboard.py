@@ -73,7 +73,7 @@ async def stats(user: CurrentUser, db: DbDep):
 
     return {
         "generated_at": iso_z(now),
-        "cameras": {**{k: cams[k] for k in ("total", "online", "degraded", "offline", "unknown")}, "anpr_live": int(anpr_live), "recording": int(recording)},
+        "cameras": {**{k: cams[k] for k in ("total", "online", "degraded", "offline", "not_streaming", "unknown")}, "anpr_live": int(anpr_live), "recording": int(recording)},
         "reads": {"last_1h": int(r_1h or 0), "last_24h": int(r_24h or 0), "total": int(r_total or 0), "last_read_at": iso_z(last_read)},
         "sightings": {"last_24h": int(s_24h or 0), "total": int(s_total or 0), "valid_format_pct_24h": round(100.0 * float(s_valid_24h or 0) / float(s_24h), 1) if s_24h else None},
         "alerts": {"new": int(a_new or 0), "acknowledged": int(a_ack or 0), "last_24h": int(a_24h or 0), "critical_open": int(a_crit or 0), "avg_latency_ms_24h": int(a_lat) if a_lat is not None else None},
@@ -81,7 +81,7 @@ async def stats(user: CurrentUser, db: DbDep):
         "object_counts_24h": oc,
         "events_24h": int(ev_24h),
         "disk": disk_usage(),
-        "anpr_workers": await worker_status(db),
+        "anpr_workers": await worker_status(db, scope),
     }
 
 

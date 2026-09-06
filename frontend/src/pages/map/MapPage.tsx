@@ -6,15 +6,15 @@ import { Checkbox, Divider, Select, Space, Spin, Switch, Typography } from 'antd
 import L from 'leaflet';
 import { GeoJSON, useMap } from '@/components/leaflet';
 import { PageHeader } from '@/components/PageHeader';
-import { BaseMap, CameraMarkers, FitBounds, escapeHtml, type MapCamera } from '@/components/MapView';
+import { BaseMap, CONFIDENCE_LEGEND, CameraMarkers, FitBounds, PanToFlash, escapeHtml, locationHint, useAlertFlash, type MapCamera } from '@/components/MapView';
 import { gapApi, geoApi } from '@/api';
-import { CAMERA_STATUS, MAINTENANCE_STATUS, departmentColour, type CameraStatus } from '@/theme/colours';
+import { CAMERA_STATUS, CATALOGUE_NOT_STREAMING, MAINTENANCE_STATUS, departmentColour, displayStatus, type CameraStatus } from '@/theme/colours';
 import { ErrorState } from '@/components/States';
 import type { GeoFeatureCollection } from '@/api/types';
 import { cameraTypeLabel, fmtMetres } from '@/utils/format';
 
 const TYPES = ['analog', 'ip', 'ptz', 'dome', 'bullet', 'anpr', 'other'];
-const STATUSES: CameraStatus[] = ['online', 'degraded', 'offline', 'unknown'];
+const STATUSES: CameraStatus[] = ['online', 'degraded', 'offline', 'not_streaming', 'unknown'];
 
 function PopupBinder({ selected }: { selected: number | null }) {
   const map = useMap();
@@ -37,6 +37,7 @@ export function MapPage() {
   const [showGaps, setShowGaps] = useState(false);
   const [cluster, setCluster] = useState(true);
   const [selected] = useState<number | null>(null);
+  const flash = useAlertFlash();
 
   const geo = useQuery({ queryKey: ['geo', 'cameras'], queryFn: () => geoApi.cameras(), staleTime: 60_000 });
   const districts = useQuery({ queryKey: ['geo', 'districts'], queryFn: geoApi.districts, staleTime: 600_000, enabled: showDistricts });
@@ -51,7 +52,7 @@ export function MapPage() {
         .map((f) => {
           const [lon, lat] = f.geometry.coordinates as [number, number];
           const p = f.properties;
-          return { id: p.id, name: p.name, lat, lon, status: p.status, department_code: p.department_code, department_name: p.department_name, maintenance_status: p.maintenance_status, anpr_enabled: p.anpr_enabled, district: p.district, type: p.type, police_station: p.police_station, codec: p.codec };
+          return { id: p.id, name: p.name, lat, lon, status: p.status, live: p.live, location_confidence: p.location_confidence ?? null, department_code: p.department_code, department_name: p.department_name, maintenance_status: p.maintenance_status, anpr_enabled: p.anpr_enabled, district: p.district, type: p.type, police_station: p.police_station, codec: p.codec };
         }),
     [geo.data],
   );
@@ -67,20 +68,21 @@ export function MapPage() {
   const cams = useMemo(
     () =>
       allCams.filter(
-        (c) => (deptFilter.length === 0 || deptFilter.includes(c.department_code)) && (typeFilter.length === 0 || typeFilter.includes(c.type ?? '')) && statusFilter.includes(c.status),
+        (c) => (deptFilter.length === 0 || deptFilter.includes(c.department_code)) && (typeFilter.length === 0 || typeFilter.includes(c.type ?? '')) && statusFilter.includes(displayStatus(c.status, c.live)),
       ),
     [allCams, deptFilter, typeFilter, statusFilter],
   );
   const points = useMemo(() => allCams.map((c) => [c.lat, c.lon] as [number, number]), [allCams]);
-  const styleOpts = useMemo(() => ({ departmentRing: deptRing, selectedId: selected }), [deptRing, selected]);
+  const styleOpts = useMemo(() => ({ departmentRing: deptRing, selectedId: selected, flashId: flash.flashId, flashColour: flash.flashColour }), [deptRing, selected, flash.flashId, flash.flashColour]);
 
   const popupHtml = useCallback(
     (c: MapCamera) => {
-      const status = CAMERA_STATUS[c.status];
+      const status = CAMERA_STATUS[displayStatus(c.status, c.live)];
       return `
       <div style="font-family:inherit">
         <div style="font-weight:600;font-size:14px;margin-bottom:4px">${escapeHtml(c.name)}</div>
         <div style="font-size:12px;color:#4B5563">${escapeHtml(c.department_name ?? c.department_code)} · ${escapeHtml(c.district ?? '—')}${c.police_station ? ' · ' + escapeHtml(c.police_station) : ''}</div>
+        ${locationHint(c) ? `<div style="font-size:11px;color:#92400E;margin-top:2px" title="Coordinates were inferred by the team from the camera name; confirm with the organiser before operational use">${escapeHtml(locationHint(c))}</div>` : ''}
         <div style="font-size:12px;margin:6px 0;display:flex;gap:8px;align-items:center">
           <span style="display:inline-flex;align-items:center;gap:4px;color:${status.colour};font-weight:500"><span style="width:8px;height:8px;border-radius:50%;background:${status.colour};display:inline-block"></span>${status.label}</span>
           <span style="color:#6B7280">${escapeHtml(cameraTypeLabel(c.type))} · ${escapeHtml(c.codec ?? '')}${c.anpr_enabled ? ' · ANPR' : ''}</span>
@@ -135,6 +137,7 @@ export function MapPage() {
       <div style={{ flex: 1, minHeight: 420, position: 'relative' }}>
         <BaseMap height="100%">
           <PopupBinder selected={selected} />
+          <PanToFlash camera={flash.camera} />
           {points.length ? <FitBounds points={points} /> : null}
           {showDistricts && districts.data ? (
             <GeoJSON key="districts" data={districts.data as unknown as GeoJSON.GeoJsonObject} style={districtStyle} onEachFeature={(f, layer) => layer.bindTooltip(`${f.properties?.name}: ${f.properties?.camera_count} cameras, ${f.properties?.online_count} online`, { sticky: true })} />
@@ -174,7 +177,7 @@ export function MapPage() {
             {STATUSES.map((st) => (
               <Checkbox key={st} checked={statusFilter.includes(st)} onChange={(e) => setStatusFilter((prev) => (e.target.checked ? [...prev, st] : prev.filter((x) => x !== st)))}>
                 <span className="sg-legend-swatch" style={{ background: CAMERA_STATUS[st].colour, display: 'inline-block', marginRight: 6 }} />
-                {CAMERA_STATUS[st].label} <span style={{ color: '#9CA3AF' }}>({allCams.filter((c) => c.status === st).length})</span>
+                <span title={st === 'not_streaming' ? CATALOGUE_NOT_STREAMING.hint : undefined}>{st === 'not_streaming' ? CATALOGUE_NOT_STREAMING.label : CAMERA_STATUS[st].label}</span> <span style={{ color: '#9CA3AF' }}>({allCams.filter((c) => displayStatus(c.status, c.live) === st).length})</span>
               </Checkbox>
             ))}
           </div>
@@ -195,6 +198,17 @@ export function MapPage() {
           </div>
           <div className="sg-legend-row">
             <span style={{ fontSize: 9, fontWeight: 700, background: '#0B1F3A', color: '#fff', borderRadius: 3, padding: '0 3px' }}>A</span> ANPR enabled
+          </div>
+          {allCams.some((c) => c.location_confidence === 'approx' || c.location_confidence === 'guess')
+            ? CONFIDENCE_LEGEND.map((row) => (
+                <div key={row.key} className="sg-legend-row" title={row.hint}>
+                  <span className="sg-legend-swatch" style={row.key === 'approx' ? { background: '#9CA3AF', boxShadow: '0 0 0 2px rgba(17,24,39,0.55)', borderStyle: 'dashed', borderColor: '#fff' } : { background: '#fff', boxShadow: '0 0 0 2px #9CA3AF' }} />
+                  {row.label}
+                </div>
+              ))
+            : null}
+          <div className="sg-legend-row" title="Three pulses in the alert priority colour when a new alert arrives">
+            <span className="sg-legend-swatch" style={{ background: '#DC2626', boxShadow: '0 0 0 3px rgba(220,38,38,0.35)' }} /> New alert (pulses)
           </div>
           {showPois ? (
             <div className="sg-legend-row">

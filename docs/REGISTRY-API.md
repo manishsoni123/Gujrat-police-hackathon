@@ -110,7 +110,7 @@ Every field is optional except `external_id` and `name`; unknown keys are ignore
 |---|---|---|---|
 | `external_id` | string ≤ 64 | required, trimmed; unique per `source` | |
 | `name` | string ≤ 160 | required | |
-| `department_code` | string | must match `departments.code` (case-insensitive) or a display-name alias (e.g. `Municipal Corporation` → `MUNICIPAL`); otherwise `UNASSIGNED` + **warning** (never a row error) | `UNASSIGNED` |
+| `department_code` | string | must match `departments.code` (case-insensitive; the list is served by `GET /departments`, §3.10) or a display-name alias (e.g. `Municipal Corporation` → `MUNICIPAL`); otherwise `UNASSIGNED` + **warning** (never a row error) | `UNASSIGNED` |
 | `type`, `ownership`, `connectivity_type`, `maintenance_status` | enum | see §2.3 | `ip`, `govt_dept`, null, `ok` |
 | `lat`, `lon` | number | both or neither; −90..90 / −180..180; warning when outside the Gujarat bounding box 20.1–24.8 N, 68.1–74.5 E | null |
 | `address`, `district`, `police_station`, `ward` | string | district is title-cased and common variants are mapped (`Devbhoomi Dwarka` → `Devbhumi Dwarka`, `Kachchh` → `Kutch`, …) | null |
@@ -202,6 +202,20 @@ Same filters as the list. Streams a CSV with the template columns (§4.1) plus `
 
 Returns `cameras_template.csv` (header of §4.1 + two example rows).
 
+### 3.10 `GET /departments` — the valid `department_code` values (permission `cameras.read`)
+
+Lists every department in the registry in code order, including departments that have no cameras yet, so that a departmental system, a CSV author or the manual form can pick a valid `department_code` (§2.4) before onboarding. No parameters; not paginated (27 seeded rows, one per Gujarat government department plus `UNASSIGNED`); scoped roles receive the full list because it contains no camera data.
+
+```json
+{ "items": [ { "id": 22, "code": "AGRI", "name": "Agriculture & Farmers Welfare" }, "…", { "id": 2, "code": "POLICE", "name": "Gujarat Police" }, "…", { "id": 1, "code": "UNASSIGNED", "name": "Unassigned" } ] }
+```
+
+`department_code` is matched case-insensitively against `code`, and the importers also accept the display `name` or a seeded alias (for example `Municipal Corporation` → `MUNICIPAL`); anything else lands in `UNASSIGNED` with a row warning, never a row error. Any value not listed here should be treated as a data-quality issue on the sending side.
+
+```bash
+curl -s https://<host>/api/departments -H "Authorization: Bearer $TOKEN" | jq -r '.items[] | "\(.code)\t\(.name)"'
+```
+
 ---
 
 ## 4. Bulk onboarding
@@ -211,6 +225,8 @@ Returns `cameras_template.csv` (header of §4.1 + two example rows).
 ```
 external_id,name,department_code,type,ownership,lat,lon,address,district,police_station,ward,rtsp_url,codec,resolution,fps,storage_location,retention_days,install_date,vendor,model,heading_deg,fov_deg,connectivity_type,bandwidth_kbps,vms_platform,nvr_id,maintenance_status,amc_vendor,amc_expiry,anpr_enabled,record_enabled
 ```
+
+Valid `department_code` values for the template come from `GET /departments` (§3.10); enumerations for the other columns are in §2.3.
 
 ### 4.2 `POST /cameras/import/csv` (permission `cameras.write`)
 

@@ -6,6 +6,7 @@ import { healthApi } from '@/api';
 import { fmtDuration } from '@/utils/time';
 import { Logo } from '@/components/Logo';
 import { useUiStore } from '@/store/ui';
+import { usePublicSettings } from '@/hooks/useCamerasOptions';
 
 const LICENCES = [
   { component: 'React 18, react-router, TanStack Query, zustand', licence: 'MIT' },
@@ -26,6 +27,11 @@ const LICENCES = [
 export function AboutPage() {
   const hz = useQuery({ queryKey: ['healthz'], queryFn: healthApi.healthz, retry: 0 });
   const desktopNotify = useUiStore((s) => s.desktopNotify);
+  const pub = usePublicSettings();
+  const catalogueSource = pub.data?.catalogue_source ?? (pub.data?.mock_sandbox ? 'mock' : undefined);
+  const catalogueLabel =
+    pub.data?.catalogue_source_label ??
+    (catalogueSource === 'sentinel_portal' ? 'Organiser Sentinel sandbox' : catalogueSource === 'mock' ? 'Built-in mock sandbox (50 synthetic cameras)' : catalogueSource === 'generic_json' ? 'Generic /api/ingest catalogue host' : 'checking...');
 
   const testNotification = async () => {
     if (!('Notification' in window)) {
@@ -61,6 +67,16 @@ export function AboutPage() {
               {hz.data ? `${hz.data.status} · DB ${hz.data.db} · MediaMTX ${hz.data.mediamtx} · ${hz.data.anpr_workers} ANPR worker(s) · up ${fmtDuration(hz.data.uptime_s)}` : hz.isError ? 'unavailable' : 'checking…'}
             </Descriptions.Item>
             <Descriptions.Item label="Time zone">All times rendered in IST (Asia/Kolkata); stored in UTC</Descriptions.Item>
+            <Descriptions.Item label="Camera source">
+              {catalogueLabel}
+              {catalogueSource === 'sentinel_portal' ? (
+                <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                  Real cameras from the Gujarat Police hackathon sandbox: catalogue <code>cameras.json</code> (portal login or uploaded copy), RTSP over TCP from {pub.data?.sandbox_stream_host ?? 'the organiser relay'} through our MediaMTX relay; coordinates and departments are team-inferred (confidence-flagged), not organiser data.
+                </div>
+              ) : catalogueSource === 'mock' ? (
+                <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>Synthetic cameras and looping test videos served by this deployment (MOCK SANDBOX badge); switch to the organiser sandbox in Settings, Catalogue tab.</div>
+              ) : null}
+            </Descriptions.Item>
           </Descriptions>
           <Space style={{ marginTop: 16 }} wrap>
             <Button icon={<ApiOutlined />} href="/api/docs" target="_blank" rel="noreferrer">
@@ -84,7 +100,7 @@ export function AboutPage() {
       <Card title="Integration surface" style={{ marginTop: 12 }}>
         <Descriptions column={2} size="small" bordered>
           <Descriptions.Item label="Bulk onboarding">POST /api/v1/cameras/bulk (X-API-Key, scope bulk)</Descriptions.Item>
-          <Descriptions.Item label="Catalogue pull">Configurable host exposing GET /api/ingest (Settings → Catalogue)</Descriptions.Item>
+          <Descriptions.Item label="Catalogue pull">Organiser Sentinel sandbox adapter (cameras.json + enrichment CSV + RTSP/TCP probe) or any host exposing GET /api/ingest (Settings → Catalogue)</Descriptions.Item>
           <Descriptions.Item label="CSV templates">Cameras and watchlist templates from the Import and Watchlist pages</Descriptions.Item>
           <Descriptions.Item label="Outbound webhooks">alert.created, alert.updated, camera.offline, camera.online, event.created (HMAC-SHA256 signed)</Descriptions.Item>
           <Descriptions.Item label="Streams">RTSP over TCP in; WebRTC (WHEP) and HLS out via an internal MediaMTX relay</Descriptions.Item>

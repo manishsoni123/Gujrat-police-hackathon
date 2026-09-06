@@ -51,7 +51,7 @@ def iso_utc(dt: datetime | None = None) -> str:
 class ApiClient:
     """Thin requests wrapper with the X-API-Key header and the contract's status handling."""
 
-    def __init__(self, base_url: str, api_key: str, dry_run: bool = False, timeout_s: float = 15.0) -> None:
+    def __init__(self, base_url: str, api_key: str, dry_run: bool = False, timeout_s: float = 30.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.dry_run = dry_run

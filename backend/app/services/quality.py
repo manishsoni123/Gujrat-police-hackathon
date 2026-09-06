@@ -20,13 +20,18 @@ def _pct(num: float, den: float) -> float | None:
     return round(100.0 * num / den, 1) if den else None
 
 
-async def compute(db: AsyncSession, scope: Scope, t_from: datetime, t_to: datetime, camera_id: int | None) -> dict[str, Any]:
+async def compute(db: AsyncSession, scope: Scope, t_from: datetime, t_to: datetime, camera_id: int | None, source: str | None = None) -> dict[str, Any]:
+    """`source` (a `cameras.source` value, e.g. `sandbox`) restricts every figure to cameras of that registry
+    source, so the government-feed quality can be reported without the own gate or mock rows."""
     cond = in_scope_condition(scope, PlateRead.camera_id)
     base = select(PlateRead).where(PlateRead.captured_at >= t_from, PlateRead.captured_at <= t_to)
     if cond is not None:
         base = base.where(cond)
     if camera_id:
         base = base.where(PlateRead.camera_id == camera_id)
+    src_sub = select(Camera.id).where(Camera.source == source) if source else None
+    if src_sub is not None:
+        base = base.where(PlateRead.camera_id.in_(src_sub))
     sub = base.subquery()
     totals = (
         await db.execute(
@@ -43,6 +48,8 @@ async def compute(db: AsyncSession, scope: Scope, t_from: datetime, t_to: dateti
         s_q = s_q.where(s_cond)
     if camera_id:
         s_q = s_q.where(Sighting.camera_id == camera_id)
+    if src_sub is not None:
+        s_q = s_q.where(Sighting.camera_id.in_(src_sub))
     s_total, unique_plates = (await db.execute(s_q)).one()
 
     per_cam_rows = (
@@ -98,7 +105,7 @@ async def compute(db: AsyncSession, scope: Scope, t_from: datetime, t_to: dateti
         for q, r, _n in labels[:60]
     ]
     return {
-        "window": {"from": iso_z(t_from), "to": iso_z(t_to), "camera_id": camera_id},
+        "window": {"from": iso_z(t_from), "to": iso_z(t_to), "camera_id": camera_id, "source": source},
         "reads_total": reads_total,
         "reads_valid_format": reads_valid,
         "valid_format_pct": _pct(reads_valid, reads_total),

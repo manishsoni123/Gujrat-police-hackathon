@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.tz import iso_z, utcnow
+from app.core.urlguard import check_outbound_url
 from app.db.models import Webhook
 from app.db.session import SessionLocal
 from app.services import settings_service as cfg
@@ -46,6 +47,15 @@ async def deliver(webhook_id: int, event: str, data: dict[str, Any], attempts: i
         if wh is None:
             return None, 0, "webhook not found"
         url, secret = wh.url, wh.secret
+    try:
+        check_outbound_url(url)  # use-time SSRF guard
+    except ValueError as exc:
+        async with SessionLocal() as db:
+            wh = await db.get(Webhook, webhook_id)
+            if wh is not None:
+                wh.last_status, wh.last_error, wh.last_delivered_at = None, f"rejected: {exc}"[:255], utcnow()
+                await db.commit()
+        return None, 0, f"rejected: {exc}"
     delivery_id = str(uuid.uuid4())
     body = json.dumps({"event": event, "ts": iso_z(utcnow()), "delivery_id": delivery_id, "data": data}, default=str).encode("utf-8")
     headers = {

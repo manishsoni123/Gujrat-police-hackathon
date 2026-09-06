@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
-from app.db.models import CAMERA_TYPES, CONNECTIVITY, MAINTENANCE, OWNERSHIPS
+from app.db.models import CAMERA_TYPES, CONNECTIVITY, LOCATION_CONFIDENCE, MAINTENANCE, OWNERSHIPS
 from app.schemas.common import ApiModel
 
 GUJARAT_BBOX = (20.1, 24.8, 68.1, 74.5)  # lat_min, lat_max, lon_min, lon_max
@@ -80,6 +80,12 @@ def _empty_to_none(v: Any) -> Any:
     return v
 
 
+def json_dumps(v: Any) -> str:
+    import json
+
+    return json.dumps(v, default=str)
+
+
 class CameraImportRow(ApiModel):
     external_id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=160)
@@ -116,6 +122,9 @@ class CameraImportRow(ApiModel):
     maintenance_status: str | None = None
     anpr_enabled: bool | None = None
     record_enabled: bool | None = None
+    # Organiser-sandbox enrichment (Amendments 2026-09-05): exact | approx | guess, and a small JSON bag
+    location_confidence: str | None = None
+    metadata: dict[str, Any] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -169,6 +178,34 @@ class CameraImportRow(ApiModel):
         if s not in MAINTENANCE:
             raise ValueError(f"must be one of {', '.join(MAINTENANCE)}")
         return s
+
+    @field_validator("location_confidence", mode="before")
+    @classmethod
+    def _loc_conf(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip().lower()
+        if s not in LOCATION_CONFIDENCE:
+            raise ValueError(f"must be one of {', '.join(LOCATION_CONFIDENCE)}")
+        return s
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _metadata(cls, v: Any) -> dict[str, Any] | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            import json
+
+            try:
+                v = json.loads(v)
+            except json.JSONDecodeError:
+                raise ValueError("must be a JSON object")
+        if not isinstance(v, dict):
+            raise ValueError("must be an object")
+        if len(json_dumps(v)) > 16 * 1024:
+            raise ValueError("must be at most 16 KB")
+        return v
 
     @field_validator("lat", mode="before")
     @classmethod
@@ -338,6 +375,8 @@ class CameraUpdate(ApiModel):
     maintenance_status: str | None = None
     anpr_enabled: bool | None = None
     record_enabled: bool | None = None
+    location_confidence: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class MaintenanceUpdate(ApiModel):
@@ -358,6 +397,8 @@ class MaintenanceUpdate(ApiModel):
 class SandboxImportRequest(ApiModel):
     measure_first_stream: bool = False
     dry_run: bool = False
+    # sentinel_portal source only: ffprobe every camera (codec/resolution/fps/live) before the upsert
+    probe: bool = True
 
 
 class BulkImportRequest(ApiModel):

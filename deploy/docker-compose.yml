@@ -41,6 +41,28 @@ x-anpr-env: &anpr-env
   ANPR_DET_MODEL: ${ANPR_DET_MODEL:-/app/weights/yolo-v9-t-384-license-plates-end2end.onnx}
   ANPR_DET_CONF: ${ANPR_DET_CONF:-0.4}
   ANPR_MIN_PLATE_W: ${ANPR_MIN_PLATE_W:-60}
+  ANPR_DET_TILE: ${ANPR_DET_TILE:-0}
+  ANPR_DET_TILE_OVERLAP: ${ANPR_DET_TILE_OVERLAP:-0.15}
+  ANPR_STATIC_BOX_WINDOW: ${ANPR_STATIC_BOX_WINDOW:-20}
+  ANPR_STATIC_BOX_HITS: ${ANPR_STATIC_BOX_HITS:-0.8}
+  ANPR_OSD_BAND: ${ANPR_OSD_BAND:-0.08}
+  ANPR_OSD_WARMUP_S: ${ANPR_OSD_WARMUP_S:-30}
+  ANPR_INVALID_READS_PER_MIN: ${ANPR_INVALID_READS_PER_MIN:-10}
+  ANPR_MAX_BOXES: ${ANPR_MAX_BOXES:-4}
+  # Accuracy pass (5 Sept 2026, anpr/ocr.py + anpr/tracks.py): OCR backend, best-shot tracking, native decode with a
+  # downscaled detector pass, and per-vehicle evidence (needs the media/anpr_evidence bind mount of anpr-live).
+  ANPR_OCR: ${ANPR_OCR:-paddle}
+  ANPR_OCR_FAST_MODEL: ${ANPR_OCR_FAST_MODEL:-global_mobile_vit_v2_ocr}
+  ANPR_OCR_PADDLE_MODE: ${ANPR_OCR_PADDLE_MODE:-det}
+  ANPR_OCR_ENSEMBLE_MIN_CONF: ${ANPR_OCR_ENSEMBLE_MIN_CONF:-0.45}
+  ANPR_OCR_MIN_W: ${ANPR_OCR_MIN_W:-60}
+  ANPR_DETECT_WIDTH: ${ANPR_DETECT_WIDTH:-0}
+  ANPR_BEST_SHOT: ${ANPR_BEST_SHOT:-1}
+  ANPR_TRACK_GAP_S: ${ANPR_TRACK_GAP_S:-2}
+  ANPR_TRACK_KEEP: ${ANPR_TRACK_KEEP:-3}
+  ANPR_TRACK_STALL: ${ANPR_TRACK_STALL:-3}
+  ANPR_EVIDENCE_PER_HOUR: ${ANPR_EVIDENCE_PER_HOUR:-200}
+  OCR_THREADS: ${OCR_THREADS:-2}
   ANPR_VOTE_WINDOW_S: ${ANPR_VOTE_WINDOW_S:-3}
   ANPR_MIN_READ_CONF: ${ANPR_MIN_READ_CONF:-0.30}
   SIGHTING_CLOSE_S: ${SIGHTING_CLOSE_S:-15}
@@ -56,6 +78,16 @@ x-anpr-env: &anpr-env
   OCR_LANG: ${OCR_LANG:-en}
   RECONNECT_MIN_S: ${RECONNECT_MIN_S:-2}
   RECONNECT_MAX_S: ${RECONNECT_MAX_S:-30}
+  # Real relay / organiser feeds (anpr/decode.py): no ffprobe before an RTSP dial, 30 s RTSP socket
+  # timeout, 90 s first-frame budget, 60 s stall watchdog, one dial at a time 3 s apart, 30 s API timeout.
+  ANPR_PROBE_TIMEOUT_S: ${ANPR_PROBE_TIMEOUT_S:-45}
+  ANPR_RTSP_PROBE: ${ANPR_RTSP_PROBE:-0}
+  ANPR_RTSP_TIMEOUT_S: ${ANPR_RTSP_TIMEOUT_S:-30}
+  ANPR_START_TIMEOUT_S: ${ANPR_START_TIMEOUT_S:-90}
+  ANPR_STALL_TIMEOUT_S: ${ANPR_STALL_TIMEOUT_S:-60}
+  ANPR_DIAL_SPACING_S: ${ANPR_DIAL_SPACING_S:-3}
+  ANPR_DECODE_THREADS: ${ANPR_DECODE_THREADS:-2}
+  API_TIMEOUT_S: ${API_TIMEOUT_S:-30}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   TZ: UTC
 
@@ -101,15 +133,19 @@ services:
       # WebRTC ICE mux (must be reachable from every browser; open on the VM firewall)
       - "8189:8189/udp"
       - "8189:8189/tcp"
-      # Local-only diagnostics: RTSP, WHEP, HLS, playback, control API. They are
-      # bound to MTX_BIND (127.0.0.1 by default) so nothing bypasses Caddy's
-      # forward_auth from outside the host. Set MTX_BIND=0.0.0.0 only on a LAN
-      # test box; the organiser-style URLs rtsp://<host>:8554/stream/<id> then work.
+      # Local-only diagnostics: RTSP, WHEP, HLS. They are bound to MTX_BIND
+      # (127.0.0.1 by default) so nothing bypasses Caddy's forward_auth from
+      # outside the host. Set MTX_BIND=0.0.0.0 only on a LAN test box; the
+      # organiser-style URLs rtsp://<host>:8554/stream/<id> then work.
       - "${MTX_BIND:-127.0.0.1}:8554:8554"
       - "${MTX_BIND:-127.0.0.1}:8888:8888"
       - "${MTX_BIND:-127.0.0.1}:8889:8889"
-      - "${MTX_BIND:-127.0.0.1}:9996:9996"
-      - "${MTX_BIND:-127.0.0.1}:9997:9997"
+      # The control API (path add/delete with runOn* shell commands) and the
+      # playback server have no authentication of their own (mediamtx.yml
+      # authInternalUsers) and are used only by the api container, so they stay
+      # on loopback regardless of MTX_BIND.
+      - "127.0.0.1:9996:9996"
+      - "127.0.0.1:9997:9997"
     volumes:
       - ./deploy/mediamtx.yml:/mediamtx.yml:ro
       - ./media:/media:ro
@@ -167,6 +203,22 @@ services:
       SANDBOX_PASSWORD: ${SANDBOX_PASSWORD:-}
       SANDBOX_AUTH_HEADER: ${SANDBOX_AUTH_HEADER:-}
       SANDBOX_TIMEOUT_S: ${SANDBOX_TIMEOUT_S:-30}
+      # Organiser ("Sentinel") sandbox - initial values of the catalogue.* / sandbox.* settings (Settings -> Catalogue).
+      # The access password is a secret: it is embedded in the relay source URLs only and masked everywhere else.
+      CATALOGUE_SOURCE: ${CATALOGUE_SOURCE:-}
+      SANDBOX_STREAM_HOST: ${SANDBOX_STREAM_HOST:-103.250.160.189}
+      SANDBOX_RTSP_PORT: ${SANDBOX_RTSP_PORT:-8554}
+      SANDBOX_WHEP_PORT: ${SANDBOX_WHEP_PORT:-8889}
+      SANDBOX_HLS_BASE: ${SANDBOX_HLS_BASE:-https://cctv.corp8.cloud}
+      SANDBOX_STREAM_EMAIL: ${SANDBOX_STREAM_EMAIL:-}
+      SANDBOX_STREAM_PASSWORD: ${SANDBOX_STREAM_PASSWORD:-}
+      SANDBOX_PORTAL_URL: ${SANDBOX_PORTAL_URL:-https://cctv.corp8.cloud}
+      SANDBOX_PORTAL_EMAIL: ${SANDBOX_PORTAL_EMAIL:-}
+      SANDBOX_PORTAL_PASSWORD: ${SANDBOX_PORTAL_PASSWORD:-}
+      CATALOGUE_ENRICHMENT_PATH: ${CATALOGUE_ENRICHMENT_PATH:-/app/media/cameras_enrichment.csv}
+      CATALOGUE_CAMERAS_JSON_PATH: ${CATALOGUE_CAMERAS_JSON_PATH:-/app/media/cameras.json}
+      SANDBOX_PROBE_TIMEOUT_S: ${SANDBOX_PROBE_TIMEOUT_S:-12}
+      SANDBOX_PROBE_PARALLEL: ${SANDBOX_PROBE_PARALLEL:-6}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-sk_internal0000000000000000000000000000000000}
       BULK_API_KEY: ${BULK_API_KEY:-sk_bulk00000000000000000000000000000000000000}
       JURY_ADMIN_PASSWORD: ${JURY_ADMIN_PASSWORD:-Sentinel@Admin2026}
@@ -176,10 +228,14 @@ services:
       SEED_ON_START: ${SEED_ON_START:-1}
       HEALTH_POLL_SECONDS: ${HEALTH_POLL_SECONDS:-60}
       HEALTH_OFFLINE_AFTER: ${HEALTH_OFFLINE_AFTER:-3}
-      HEALTH_PROBE_MAX: ${HEALTH_PROBE_MAX:-20}
+      HEALTH_PROBE_MAX: ${HEALTH_PROBE_MAX:-2}
       HEALTH_PROBE_TIMEOUT_S: ${HEALTH_PROBE_TIMEOUT_S:-6}
+      HEALTH_PROBE_PARALLEL: ${HEALTH_PROBE_PARALLEL:-2}
+      HEALTH_PROBE_MIN_INTERVAL_S: ${HEALTH_PROBE_MIN_INTERVAL_S:-900}
+      HEALTH_PROBE_VIA: ${HEALTH_PROBE_VIA:-direct}
       ANPR_AUTO_ENABLE_MAX: ${ANPR_AUTO_ENABLE_MAX:-12}
       ALERT_SUPPRESSION_SECONDS: ${ALERT_SUPPRESSION_SECONDS:-60}
+      ALERT_RE_ALERT_MINUTES: ${ALERT_RE_ALERT_MINUTES:-60}
       FUZZY_ALERT_MIN_CONF: ${FUZZY_ALERT_MIN_CONF:-0.8}
       ALERT_ESCALATE_MINUTES: ${ALERT_ESCALATE_MINUTES:-5}
       ROUTE_SPEED_FLAG_KMH: ${ROUTE_SPEED_FLAG_KMH:-150}
@@ -204,6 +260,9 @@ services:
     volumes:
       - sentinel_data:/data
       - ./media:/media:ro
+      # same directory again at /app/media: the organiser catalogue copy (cameras.json) and the team's
+      # enrichment CSV are read from there (CATALOGUE_CAMERAS_JSON_PATH / CATALOGUE_ENRICHMENT_PATH)
+      - ./media:/app/media:ro
       - recordings:/recordings:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz >/dev/null"]
@@ -270,6 +329,10 @@ services:
     container_name: sentinel-anpr-live
     restart: unless-stopped
     logging: *default-logging
+    # Worker runs as uid 10001 and writes nothing at run time (CONTRACT amendment, anpr §1.1)
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
     profiles: ["cpu"]
     depends_on:
       api:
@@ -282,6 +345,10 @@ services:
       ANPR_MODE: live
       ANPR_MAX_CAMERAS: ${ANPR_MAX_CAMERAS:-3}
       WORKER_ID: ${ANPR_LIVE_WORKER_ID:-live-cpu}
+      ANPR_EVIDENCE_DIR: ${ANPR_EVIDENCE_DIR:-/app/media/anpr_evidence}
+    volumes:
+      # detected-vehicle evidence (one crop + JSON line per plate track; anpr/evidence.py) - the only thing the worker writes
+      - ./media/anpr_evidence:/app/media/anpr_evidence
     deploy:
       resources:
         limits:
@@ -298,6 +365,10 @@ services:
     container_name: sentinel-anpr-preindex
     restart: unless-stopped
     logging: *default-logging
+    # Worker runs as uid 10001 and writes nothing at run time (CONTRACT amendment, anpr §1.1)
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
     profiles: ["cpu", "preindex"]
     depends_on:
       api:

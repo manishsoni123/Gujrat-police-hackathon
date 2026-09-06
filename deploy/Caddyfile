@@ -176,9 +176,25 @@
 		file_server
 	}
 
+	# JSON access log with the session token redacted: the SPA retries a
+	# cookie-less WebSocket upgrade with ?token=<JWT> and <video>/<img>
+	# elements pass ?token= on /mtx/* and /playback/* (media_auth). Without the
+	# filter every such JWT (valid for JWT_EXPIRE_HOURS) would sit in plaintext
+	# in the container logs. MediaMTX answers the first HLS request with a 302
+	# whose Location echoes the query string, so the response header is
+	# filtered too. Caddy already replaces the Authorization and Cookie
+	# request headers with REDACTED by default.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			request>uri query {
+				replace token REDACTED
+			}
+			resp_headers>Location query {
+				replace token REDACTED
+			}
+		}
 		level INFO
 	}
 }

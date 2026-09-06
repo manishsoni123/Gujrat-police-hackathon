@@ -1,18 +1,20 @@
 /**
- * Settings (/settings, admin). Tabs: Catalogue (host, auth, field map, test),
+ * Settings (/settings, admin). Tabs: Catalogue (source selector: organiser Sentinel sandbox with
+ * stream credentials / portal login / enrichment CSV, or mock / generic host with field map; test),
  * Retention & privacy, Alerts & routes, Notifications, Webhooks (CRUD + test),
  * API keys (create shows the key once, revoke), Users (link). Deep links /settings/:tab.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
-import { ApiOutlined, CheckCircleOutlined, CopyOutlined, DeleteOutlined, ExperimentOutlined, KeyOutlined, PlusOutlined, SaveOutlined, SendOutlined, TeamOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from 'antd';
+import { ApiOutlined, CheckCircleOutlined, CopyOutlined, DeleteOutlined, ExperimentOutlined, KeyOutlined, PlusOutlined, SaveOutlined, SendOutlined, TeamOutlined, UploadOutlined } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
 import { apiKeysApi, settingsApi, webhooksApi } from '@/api';
 import { ApiError, errorMessage } from '@/api/client';
-import type { ApiKeyCreated, CatalogueTestResult, SettingItem, SettingValue, Webhook, WebhookEventType, WebhookInput } from '@/api/types';
+import type { ApiKeyCreated, CatalogueSource, CatalogueTestResult, EnrichmentUploadResult, SettingItem, SettingValue, Webhook, WebhookEventType, WebhookInput } from '@/api/types';
 import { ErrorState, PageSkeleton, EmptyState } from '@/components/States';
+import { ALERT_PRIORITY } from '@/theme/colours';
 import { ConfirmDialog } from '@/components/Dialogs';
 import { IstTime } from '@/components/IstTime';
 import { useAuthStore } from '@/store/auth';
@@ -71,94 +73,287 @@ function useSettingsForm(items: SettingItem[] | undefined, keys: string[]) {
   return { form, save, fe };
 }
 
+const GENERIC_KEYS = ['catalogue.base_url', 'catalogue.auth_type', 'catalogue.auth_username', 'catalogue.auth_password', 'catalogue.auth_header', 'catalogue.timeout_s', 'catalogue.field_map', 'catalogue.department_aliases'];
+const SENTINEL_KEYS = [
+  'sandbox.stream_host',
+  'sandbox.rtsp_port',
+  'sandbox.whep_port',
+  'sandbox.hls_base',
+  'sandbox.stream_email',
+  'sandbox.stream_password',
+  'sandbox.probe_timeout_s',
+  'sandbox.probe_parallel',
+  'catalogue.portal_url',
+  'catalogue.portal_email',
+  'catalogue.portal_password',
+  'catalogue.enrichment_path',
+  'catalogue.cameras_json_path',
+];
+const SOURCE_OPTIONS: { value: CatalogueSource; label: string }[] = [
+  { value: 'sentinel_portal', label: 'Organiser Sentinel sandbox (cctv.corp8.cloud, real cameras)' },
+  { value: 'mock', label: 'Built-in mock sandbox (50 synthetic cameras, laptop tests)' },
+  { value: 'generic_json', label: 'Generic catalogue host exposing GET /api/ingest' },
+];
+const CATALOGUE_KEYS = ['catalogue.source', ...GENERIC_KEYS, ...SENTINEL_KEYS];
+
+function SentinelTestResult({ test }: { test: CatalogueTestResult }) {
+  const cat = test.catalogue;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <Alert
+        type={test.ok ? 'success' : 'error'}
+        showIcon
+        message={test.probe?.summary ?? test.error ?? (test.ok ? 'Stream reachable' : 'Stream not reachable')}
+        description={
+          <div style={{ fontSize: 12, display: 'grid', gap: 2 }}>
+            <span>
+              Stream relay <code>{test.stream?.host}:{test.stream?.rtsp_port}</code> (RTSP over TCP) as <code>{test.stream?.email || '(no e-mail)'}</code>
+              {test.stream?.configured ? '' : ' - host, e-mail and access password must all be set'} {test.probe?.duration_ms != null ? `· probe ${(test.probe.duration_ms / 1000).toFixed(1)} s` : ''}
+              {test.probe?.profile ? ` · profile ${test.probe.profile}` : ''}
+            </span>
+            <span>
+              Catalogue ({cat?.mode === 'portal' ? 'portal login' : 'server-side / uploaded file'}): {cat?.ok ? <span><strong>{cat.count}</strong> cameras from <code>{cat.source}</code></span> : <span style={{ color: '#B91C1C' }}>{cat?.error ?? 'not checked'}</span>}
+              {cat?.fallback ? <span> · fallback file <code>{cat.fallback.source}</code> ({cat.fallback.count} cameras)</span> : null}
+            </span>
+            <span>Enrichment CSV: {test.enrichment_path ? <code>{test.enrichment_path}</code> : <span style={{ color: '#92400E' }}>none found - upload one below</span>}</span>
+            {cat?.notes?.length ? <span style={{ color: '#6B7280' }}>{cat.notes.join(' · ')}</span> : null}
+          </div>
+        }
+      />
+    </div>
+  );
+}
+
 function CatalogueTab({ items }: { items: SettingItem[] }) {
-  const keys = ['catalogue.base_url', 'catalogue.auth_type', 'catalogue.auth_username', 'catalogue.auth_password', 'catalogue.auth_header', 'catalogue.timeout_s', 'catalogue.field_map', 'catalogue.department_aliases'];
-  const { form, save, fe } = useSettingsForm(items, keys);
+  const { form, save, fe } = useSettingsForm(items, CATALOGUE_KEYS);
+  const qc = useQueryClient();
+  const source = (Form.useWatch('catalogue.source', form) as CatalogueSource | undefined) ?? 'mock';
   const authType = Form.useWatch('catalogue.auth_type', form);
   const [test, setTest] = useState<CatalogueTestResult | null>(null);
+  const [enrich, setEnrich] = useState<EnrichmentUploadResult | null>(null);
   const runTest = useMutation({
     mutationFn: () => {
       const v = form.getFieldsValue();
-      return settingsApi.testCatalogue({ base_url: v['catalogue.base_url'], auth_type: v['catalogue.auth_type'], auth_username: v['catalogue.auth_username'], auth_password: v['catalogue.auth_password'], auth_header: v['catalogue.auth_header'], timeout_s: v['catalogue.timeout_s'] });
+      if (v['catalogue.source'] === 'sentinel_portal') {
+        return settingsApi.testCatalogue({
+          source: 'sentinel_portal',
+          camera_id: 'cam01',
+          stream_host: v['sandbox.stream_host'],
+          rtsp_port: v['sandbox.rtsp_port'],
+          whep_port: v['sandbox.whep_port'],
+          stream_email: v['sandbox.stream_email'],
+          stream_password: v['sandbox.stream_password'],
+          portal_url: v['catalogue.portal_url'],
+          portal_email: v['catalogue.portal_email'],
+          portal_password: v['catalogue.portal_password'],
+        });
+      }
+      return settingsApi.testCatalogue({ source: v['catalogue.source'], base_url: v['catalogue.base_url'], auth_type: v['catalogue.auth_type'], auth_username: v['catalogue.auth_username'], auth_password: v['catalogue.auth_password'], auth_header: v['catalogue.auth_header'], timeout_s: v['catalogue.timeout_s'] });
     },
     onSuccess: setTest,
   });
-  const updated = items.find((s) => s.key === 'catalogue.base_url');
+  const upload = useMutation({
+    mutationFn: (f: File) => settingsApi.uploadEnrichment(f),
+    onSuccess: (r) => {
+      setEnrich(r);
+      message.success(`${r.rows} enrichment rows loaded (${r.with_coordinates} with coordinates)`);
+      qc.invalidateQueries({ queryKey: ['settings'] });
+    },
+  });
+  const updated = items.find((s) => s.key === 'catalogue.source');
+  const sentinel = source === 'sentinel_portal';
+  const testButton = (
+    <Button icon={<ExperimentOutlined />} loading={runTest.isPending} onClick={() => runTest.mutate()}>
+      {sentinel ? 'Test cam01 with these credentials' : 'Test connection'}
+    </Button>
+  );
   return (
     <Form form={form} layout="vertical" onFinish={(v) => save.mutate(v)} requiredMark={false}>
-      <div className="sg-grid sg-grid-2" style={{ alignItems: 'start' }}>
-        <Card size="small" title="Catalogue host and credentials" extra={updated?.updated_at ? <span style={{ fontSize: 12, color: '#6B7280' }}>updated <IstTime value={updated.updated_at} /> by {updated.updated_by_username ?? '—'}</span> : null}>
-          <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Phase 2 onboarding" description="Point this at the on-site environment's host; Import from catalogue then onboards every camera in one click. The importer calls {base_url}/api/ingest." />
-          <Form.Item name="catalogue.base_url" label="Base URL" rules={[{ required: true }, { pattern: /^https?:\/\//, message: 'http(s)://host[:port][/prefix]' }]} {...fe('catalogue.base_url')}>
-            <Input placeholder="http://10.0.0.5" />
+      <Card size="small" title="Catalogue source" style={{ marginBottom: 12 }} extra={updated?.updated_at ? <span style={{ fontSize: 12, color: '#6B7280' }}>updated <IstTime value={updated.updated_at} /> by {updated.updated_by_username ?? '—'}</span> : null}>
+        <div className="sg-grid sg-grid-2" style={{ alignItems: 'end' }}>
+          <Form.Item name="catalogue.source" label="Where cameras come from" {...fe('catalogue.source')} style={{ marginBottom: 8 }}>
+            <Select options={SOURCE_OPTIONS} />
           </Form.Item>
-          <Space style={{ display: 'flex' }} align="start">
-            <Form.Item name="catalogue.auth_type" label="Authentication" style={{ width: 180 }} {...fe('catalogue.auth_type')}>
-              <Select options={[{ value: 'none', label: 'None' }, { value: 'basic', label: 'HTTP basic' }, { value: 'bearer', label: 'Bearer token' }, { value: 'header', label: 'Custom header' }]} />
-            </Form.Item>
-            <Form.Item name="catalogue.timeout_s" label="Timeout (s)" style={{ width: 120 }} {...fe('catalogue.timeout_s')}>
-              <InputNumber min={5} max={300} style={{ width: '100%' }} />
-            </Form.Item>
-          </Space>
-          {authType === 'basic' ? (
-            <Form.Item name="catalogue.auth_username" label="Username" {...fe('catalogue.auth_username')}>
-              <Input autoComplete="off" />
-            </Form.Item>
-          ) : null}
-          {authType === 'basic' || authType === 'bearer' ? (
-            <Form.Item name="catalogue.auth_password" label={authType === 'bearer' ? 'Token' : 'Password'} extra="Masked after saving; leave the mask unchanged to keep the stored secret." {...fe('catalogue.auth_password')}>
-              <Input.Password autoComplete="new-password" />
-            </Form.Item>
-          ) : null}
-          {authType === 'header' ? (
-            <Form.Item name="catalogue.auth_header" label="Header (Name: value)" {...fe('catalogue.auth_header')}>
-              <Input.Password placeholder="X-Api-Key: abc123" autoComplete="off" />
-            </Form.Item>
-          ) : null}
-          <Space>
+          <Space style={{ marginBottom: 8 }} wrap>
             <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
               Save
             </Button>
-            <Button icon={<ExperimentOutlined />} loading={runTest.isPending} onClick={() => runTest.mutate()}>
-              Test connection
-            </Button>
+            {testButton}
           </Space>
-          {runTest.isError ? <Alert type="error" showIcon style={{ marginTop: 12 }} message={errorMessage(runTest.error)} /> : null}
-          {test ? (
-            <div style={{ marginTop: 12 }}>
-              {test.ok ? (
-                <Alert type="success" showIcon message={`Reachable · HTTP ${test.status} · ${test.count} cameras · ${test.duration_ms} ms`} description={test.unmapped_fields?.length ? <span>Unmapped source fields: {test.unmapped_fields.map((f) => <Tag key={f} style={{ margin: '0 4px 0 0' }}>{f}</Tag>)} - add them to the field map if needed.</span> : 'Every source field is mapped.'} />
-              ) : (
-                <Alert type="error" showIcon message="Catalogue not reachable" description={test.error} />
-              )}
-              {test.ok && test.sample ? (
-                <div className="sg-grid sg-grid-2" style={{ marginTop: 8 }}>
-                  <div>
-                    <Typography.Text strong style={{ fontSize: 12 }}>First catalogue item</Typography.Text>
-                    <pre className="sg-json" style={{ maxHeight: 220 }}>{JSON.stringify(test.sample, null, 2)}</pre>
-                  </div>
-                  <div>
-                    <Typography.Text strong style={{ fontSize: 12 }}>Mapped to CameraImportRow</Typography.Text>
-                    <pre className="sg-json" style={{ maxHeight: 220 }}>{JSON.stringify(test.mapped_sample, null, 2)}</pre>
-                  </div>
+        </div>
+        <Typography.Paragraph type="secondary" style={{ margin: 0, fontSize: 12 }}>
+          {sentinel
+            ? 'Real sandbox: the catalogue is cameras.json (portal session or an uploaded copy), coordinates and departments come from the team enrichment CSV, and every camera is probed over RTSP/TCP on import. The MOCK SANDBOX badge disappears once this is saved.'
+            : source === 'mock'
+              ? 'Built-in mock served by the API container (50 synthetic cameras, 8 looping streams). Laptop tests and the integration checks use it; the header shows a MOCK SANDBOX badge.'
+              : 'Any host that exposes the organiser-shaped GET /api/ingest; field map and department aliases below adapt to its JSON shape.'}
+        </Typography.Paragraph>
+        {runTest.isError ? <Alert type="error" showIcon style={{ marginTop: 12 }} message={errorMessage(runTest.error)} /> : null}
+        {test && (test.source === 'sentinel_portal' || test.probe) ? <SentinelTestResult test={test} /> : null}
+        {test && !(test.source === 'sentinel_portal' || test.probe) ? (
+          <div style={{ marginTop: 12 }}>
+            {test.ok ? (
+              <Alert type="success" showIcon message={`Reachable · HTTP ${test.status} · ${test.count} cameras · ${test.duration_ms} ms`} description={test.unmapped_fields?.length ? <span>Unmapped source fields: {test.unmapped_fields.map((f) => <Tag key={f} style={{ margin: '0 4px 0 0' }}>{f}</Tag>)} - add them to the field map if needed.</span> : 'Every source field is mapped.'} />
+            ) : (
+              <Alert type="error" showIcon message="Catalogue not reachable" description={test.error} />
+            )}
+            {test.ok && test.sample ? (
+              <div className="sg-grid sg-grid-2" style={{ marginTop: 8 }}>
+                <div>
+                  <Typography.Text strong style={{ fontSize: 12 }}>First catalogue item</Typography.Text>
+                  <pre className="sg-json" style={{ maxHeight: 220 }}>{JSON.stringify(test.sample, null, 2)}</pre>
                 </div>
+                <div>
+                  <Typography.Text strong style={{ fontSize: 12 }}>Mapped to CameraImportRow</Typography.Text>
+                  <pre className="sg-json" style={{ maxHeight: 220 }}>{JSON.stringify(test.mapped_sample, null, 2)}</pre>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </Card>
+      {sentinel ? (
+        <div className="sg-grid sg-grid-2" style={{ alignItems: 'start' }}>
+          <Card size="small" title="Organiser stream relay (MediaMTX)">
+            <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Access password, not the portal password" description="Streams are pulled as rtsp://<e-mail>:<access password>@<host>:<port>/stream/<id> over TCP. The e-mail is percent-encoded automatically. The password is stored as a secret: it is embedded in the relay's source URL only and masked in every response, export, audit row and log." />
+            <Space style={{ display: 'flex' }} align="start" wrap>
+              <Form.Item name="sandbox.stream_host" label="Host or IP" style={{ width: 220 }} rules={[{ required: true }]} {...fe('sandbox.stream_host')}>
+                <Input placeholder="103.250.160.189" />
+              </Form.Item>
+              <Form.Item name="sandbox.rtsp_port" label="RTSP port" style={{ width: 110 }} {...fe('sandbox.rtsp_port')}>
+                <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="sandbox.whep_port" label="WHEP port" style={{ width: 110 }} {...fe('sandbox.whep_port')}>
+                <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+              </Form.Item>
+            </Space>
+            <Form.Item name="sandbox.stream_email" label="Registered e-mail" rules={[{ required: true }]} {...fe('sandbox.stream_email')}>
+              <Input autoComplete="off" placeholder="you@example.com" />
+            </Form.Item>
+            <Form.Item name="sandbox.stream_password" label="Access password" extra="Masked after saving; leave the mask unchanged to keep the stored password." {...fe('sandbox.stream_password')}>
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+            <Form.Item name="sandbox.hls_base" label="Reference HLS base (stored only, needs a portal session)" {...fe('sandbox.hls_base')}>
+              <Input placeholder="https://cctv.corp8.cloud" />
+            </Form.Item>
+            <Space style={{ display: 'flex' }} align="start" wrap>
+              <Form.Item name="sandbox.probe_timeout_s" label="Import probe timeout (s)" style={{ width: 190 }} {...fe('sandbox.probe_timeout_s')}>
+                <InputNumber min={3} max={60} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="sandbox.probe_parallel" label="Parallel probes (max 6)" style={{ width: 190 }} extra="Pace the load: each probe opens its own copy of the stream." {...fe('sandbox.probe_parallel')}>
+                <InputNumber min={1} max={6} style={{ width: '100%' }} />
+              </Form.Item>
+            </Space>
+            <Space>
+              <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
+                Save
+              </Button>
+              {testButton}
+            </Space>
+          </Card>
+          <div style={{ display: 'grid', gap: 12 }}>
+            <Card size="small" title="Portal login (optional)">
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0, fontSize: 12 }}>
+                With a portal password the importer logs in to the portal itself (cookie session) and downloads <code>/cameras.json</code>. Without it - the usual case - it uses the last uploaded <code>cameras.json</code> (Import page) or the server-side copy and says so in the import warnings.
+              </Typography.Paragraph>
+              <Form.Item name="catalogue.portal_url" label="Portal URL" {...fe('catalogue.portal_url')}>
+                <Input placeholder="https://cctv.corp8.cloud" />
+              </Form.Item>
+              <Form.Item name="catalogue.portal_email" label="Portal e-mail" {...fe('catalogue.portal_email')}>
+                <Input autoComplete="off" />
+              </Form.Item>
+              <Form.Item name="catalogue.portal_password" label="Portal password" extra="Masked after saving. Empty = no portal login (file fallback)." {...fe('catalogue.portal_password')}>
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+              <Form.Item name="catalogue.cameras_json_path" label="Server-side cameras.json (fallback)" {...fe('catalogue.cameras_json_path')}>
+                <Input placeholder="/app/media/cameras.json" />
+              </Form.Item>
+              <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
+                Save
+              </Button>
+            </Card>
+            <Card size="small" title="Enrichment CSV (team-inferred coordinates and departments)">
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0, fontSize: 12 }}>
+                <code>external_id,name,lat,lon,district,city,police_station,department_code,camera_type_guess,location_confidence,location_source,notes</code> keyed by the catalogue id. Confidence <em>exact / approx / guess</em> drives the map marker style. Missing department = UNASSIGNED.
+              </Typography.Paragraph>
+              <Form.Item name="catalogue.enrichment_path" label="Server-side path" {...fe('catalogue.enrichment_path')}>
+                <Input placeholder="/app/media/cameras_enrichment.csv" />
+              </Form.Item>
+              <Upload accept=".csv,text/csv" maxCount={1} showUploadList={false} beforeUpload={(f) => { upload.mutate(f); return false; }}>
+                <Button icon={<UploadOutlined />} loading={upload.isPending}>
+                  Upload enrichment CSV
+                </Button>
+              </Upload>
+              {upload.isError ? <Alert type="error" showIcon style={{ marginTop: 8 }} message={errorMessage(upload.error)} /> : null}
+              {enrich ? (
+                <Alert
+                  type={enrich.warnings.length ? 'warning' : 'success'}
+                  showIcon
+                  style={{ marginTop: 8 }}
+                  message={`${enrich.rows} rows · ${enrich.with_coordinates} with coordinates · exact ${enrich.confidence.exact} / approx ${enrich.confidence.approx} / guess ${enrich.confidence.guess}`}
+                  description={
+                    <span style={{ fontSize: 12 }}>
+                      Saved as <code>{enrich.path}</code> · departments {enrich.departments.join(', ') || 'none'}
+                      {enrich.unknown_columns.length ? ` · ignored columns ${enrich.unknown_columns.join(', ')}` : ''}
+                      {enrich.warnings.length ? <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{enrich.warnings.slice(0, 8).map((w) => <li key={w}>{w}</li>)}</ul> : null}
+                    </span>
+                  }
+                />
               ) : null}
-            </div>
-          ) : null}
-        </Card>
-        <Card size="small" title="Field map and department aliases">
-          <Typography.Paragraph type="secondary" style={{ marginTop: 0, fontSize: 12 }}>Each target field lists candidate source paths in order (dotted paths allowed, e.g. <code>location.lat</code>); the first present, non-empty value wins. Wrapper objects (<code>cameras</code>, <code>data</code>, <code>items</code>, <code>results</code>, <code>streams</code>) are unwrapped automatically.</Typography.Paragraph>
-          <Form.Item name="catalogue.field_map" label="Field map (JSON)" {...fe('catalogue.field_map')}>
-            <Input.TextArea rows={14} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }} spellCheck={false} />
-          </Form.Item>
-          <Form.Item name="catalogue.department_aliases" label="Department aliases (lower-case name → code, JSON)" {...fe('catalogue.department_aliases')}>
-            <Input.TextArea rows={8} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }} spellCheck={false} />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
-            Save
-          </Button>
-        </Card>
-      </div>
+            </Card>
+          </div>
+        </div>
+      ) : (
+        <div className="sg-grid sg-grid-2" style={{ alignItems: 'start' }}>
+          <Card size="small" title="Catalogue host and credentials">
+            <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Phase 2 onboarding" description="Point this at the on-site environment's host; Import from catalogue then onboards every camera in one click. The importer calls {base_url}/api/ingest." />
+            <Form.Item name="catalogue.base_url" label="Base URL" rules={[{ required: true }, { pattern: /^https?:\/\//, message: 'http(s)://host[:port][/prefix]' }]} {...fe('catalogue.base_url')}>
+              <Input placeholder="http://10.0.0.5" />
+            </Form.Item>
+            <Space style={{ display: 'flex' }} align="start">
+              <Form.Item name="catalogue.auth_type" label="Authentication" style={{ width: 180 }} {...fe('catalogue.auth_type')}>
+                <Select options={[{ value: 'none', label: 'None' }, { value: 'basic', label: 'HTTP basic' }, { value: 'bearer', label: 'Bearer token' }, { value: 'header', label: 'Custom header' }]} />
+              </Form.Item>
+              <Form.Item name="catalogue.timeout_s" label="Timeout (s)" style={{ width: 120 }} {...fe('catalogue.timeout_s')}>
+                <InputNumber min={5} max={300} style={{ width: '100%' }} />
+              </Form.Item>
+            </Space>
+            {authType === 'basic' ? (
+              <Form.Item name="catalogue.auth_username" label="Username" {...fe('catalogue.auth_username')}>
+                <Input autoComplete="off" />
+              </Form.Item>
+            ) : null}
+            {authType === 'basic' || authType === 'bearer' ? (
+              <Form.Item name="catalogue.auth_password" label={authType === 'bearer' ? 'Token' : 'Password'} extra="Masked after saving; leave the mask unchanged to keep the stored secret." {...fe('catalogue.auth_password')}>
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+            ) : null}
+            {authType === 'header' ? (
+              <Form.Item name="catalogue.auth_header" label="Header (Name: value)" {...fe('catalogue.auth_header')}>
+                <Input.Password placeholder="X-Api-Key: abc123" autoComplete="off" />
+              </Form.Item>
+            ) : null}
+            <Space>
+              <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
+                Save
+              </Button>
+              {testButton}
+            </Space>
+          </Card>
+          <Card size="small" title="Field map and department aliases">
+            <Typography.Paragraph type="secondary" style={{ marginTop: 0, fontSize: 12 }}>Each target field lists candidate source paths in order (dotted paths allowed, e.g. <code>location.lat</code>); the first present, non-empty value wins. Wrapper objects (<code>cameras</code>, <code>data</code>, <code>items</code>, <code>results</code>, <code>streams</code>) are unwrapped automatically.</Typography.Paragraph>
+            <Form.Item name="catalogue.field_map" label="Field map (JSON)" {...fe('catalogue.field_map')}>
+              <Input.TextArea rows={14} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }} spellCheck={false} />
+            </Form.Item>
+            <Form.Item name="catalogue.department_aliases" label="Department aliases (lower-case name → code, JSON)" {...fe('catalogue.department_aliases')}>
+              <Input.TextArea rows={8} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }} spellCheck={false} />
+            </Form.Item>
+            <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
+              Save
+            </Button>
+          </Card>
+        </div>
+      )}
     </Form>
   );
 }
@@ -200,7 +395,7 @@ function NotificationsTab({ items }: { items: SettingItem[] }) {
             <Input />
           </Form.Item>
           <Form.Item name="notify.telegram_min_priority" label="Minimum priority" {...fe('notify.telegram_min_priority')}>
-            <Select options={['critical', 'high', 'medium', 'low'].map((p) => ({ value: p, label: p }))} />
+            <Select options={(['critical', 'high', 'medium', 'low'] as const).map((p) => ({ value: p, label: `${ALERT_PRIORITY[p].label} and above` }))} />
           </Form.Item>
           <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
             Save

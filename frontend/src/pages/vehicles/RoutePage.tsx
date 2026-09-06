@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Card, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { rowProps } from '@/hooks/useListQuery';
+import { MATCH_LABEL, CONFIRMATION_LABEL } from '@/utils/labels';
 import { FilePdfOutlined, PlayCircleOutlined, PrinterOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons';
 import { Marker, Polyline, Popup } from '@/components/leaflet';
 import { PageHeader } from '@/components/PageHeader';
@@ -29,6 +31,34 @@ const FLAG_META: Record<string, { colour: string; label: string }> = {
   overlap: { colour: '#7C3AED', label: 'Overlap' },
 };
 
+/** Default route window: the last 2 h (a looping demo feed produces ~4 stops per 90 s loop). */
+const DEFAULT_WINDOW_H = 2;
+const WINDOW_PRESETS = [2, 6, 24];
+const CROPS_INITIAL = 12;
+const TIMELINE_PAGE = 25;
+
+interface CameraStops {
+  key: number;
+  camera: RouteSighting['camera'];
+  stops: RouteSighting[];
+  label: number;
+  fuzzy: boolean;
+}
+
+/** One marker per camera (stops at the same camera would otherwise stack on the same point). */
+function groupByCamera(sightings: RouteSighting[]): CameraStops[] {
+  const map = new Map<number, CameraStops>();
+  sightings.forEach((s) => {
+    if (s.camera.lat === null || s.camera.lon === null) return;
+    const g = map.get(s.camera.id);
+    if (g) {
+      g.stops.push(s);
+      g.fuzzy = g.fuzzy && s.match === 'fuzzy';
+    } else map.set(s.camera.id, { key: s.camera.id, camera: s.camera, stops: [s], label: s.seq, fuzzy: s.match === 'fuzzy' });
+  });
+  return Array.from(map.values());
+}
+
 function FlagTag({ type }: { type: string }) {
   const m = FLAG_META[type] ?? { colour: '#9CA3AF', label: type };
   return (
@@ -44,10 +74,18 @@ export function RoutePage() {
   const [sp, setSp] = useSearchParams();
   const canExport = usePermission('reports.export');
   const [include, setInclude] = useState<'confirmed' | 'all'>((sp.get('include') as 'confirmed' | 'all') ?? 'confirmed');
-  const [range, setRange] = useState<IsoRange>({ from: sp.get('from') ?? hoursAgoIso(24), to: sp.get('to') ?? nowIso() });
+  const [range, setRange] = useState<IsoRange>({ from: sp.get('from') ?? hoursAgoIso(DEFAULT_WINDOW_H), to: sp.get('to') ?? nowIso() });
   const [exportOpen, setExportOpen] = useState(false);
   const [play, setPlay] = useState<RouteSighting | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [showAllCrops, setShowAllCrops] = useState(false);
+  const [page, setPage] = useState(1);
+  const setWindow = (hours: number) => setRange({ from: hoursAgoIso(hours), to: nowIso() });
+  const activePreset = useMemo(() => {
+    if (!range.from || !range.to) return null;
+    const hours = (Date.parse(range.to) - Date.parse(range.from)) / 3_600_000;
+    return WINDOW_PRESETS.find((h) => Math.abs(h - hours) < 0.05) ?? null;
+  }, [range]);
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -61,6 +99,13 @@ export function RoutePage() {
   const r: VehicleRoute | undefined = route.data;
   const points = useMemo(() => r?.polyline ?? [], [r]);
   const legByTo = useMemo(() => new Map((r?.legs ?? []).map((l) => [l.to_seq, l])), [r]);
+  const cameraStops = useMemo(() => groupByCamera(r?.sightings ?? []), [r]);
+  // Jump the timeline to the page holding the stop chosen on the map.
+  useEffect(() => {
+    if (selected === null || !r) return;
+    const idx = r.sightings.findIndex((s) => s.seq === selected);
+    if (idx >= 0) setPage(Math.floor(idx / TIMELINE_PAGE) + 1);
+  }, [selected, r]);
 
   if (route.isLoading) return <PageSkeleton cards={3} />;
   if (route.isError) return <ErrorState error={route.error} onRetry={() => void route.refetch()} />;
@@ -89,7 +134,7 @@ export function RoutePage() {
         );
       },
     },
-    { title: 'Match', dataIndex: 'match', width: 120, render: (v: string, s: RouteSighting) => <Space size={4}><Tag color={v === 'exact' ? 'blue' : 'orange'} style={{ margin: 0 }}>{v}</Tag>{s.confirmation ? <Tag color={s.confirmation === 'confirmed' ? 'green' : 'default'} style={{ margin: 0 }}>{s.confirmation}</Tag> : null}</Space> },
+    { title: 'Match', dataIndex: 'match', width: 150, render: (v: string, s: RouteSighting) => <Space size={4}><Tag color={v === 'exact' ? 'blue' : 'orange'} style={{ margin: 0 }}>{MATCH_LABEL[v] ?? v}</Tag>{s.confirmation ? <Tag color={s.confirmation === 'confirmed' ? 'green' : 'default'} style={{ margin: 0 }}>{CONFIRMATION_LABEL[s.confirmation] ?? s.confirmation}</Tag> : null}</Space> },
     { title: '', width: 60, className: 'sg-no-print', render: (_v: unknown, s: RouteSighting) => <Tooltip title={s.recording_available ? 'Play recording from 10 s before' : 'No recording on this camera'}><Button size="small" icon={<PlayCircleOutlined />} disabled={!s.recording_available} onClick={(e) => { e.stopPropagation(); setPlay(s); }} aria-label="Play recording" /></Tooltip> },
   ];
 
@@ -106,6 +151,13 @@ export function RoutePage() {
         }
         extra={
           <Space wrap className="sg-no-print">
+            <Space.Compact>
+              {WINDOW_PRESETS.map((h) => (
+                <Button key={h} type={activePreset === h ? 'primary' : 'default'} onClick={() => setWindow(h)} aria-pressed={activePreset === h}>
+                  Last {h} h
+                </Button>
+              ))}
+            </Space.Compact>
             <RangeIst value={range} onChange={setRange} />
             <Segmented value={include} options={[{ value: 'confirmed', label: 'Exact + confirmed' }, { value: 'all', label: 'All candidates' }]} onChange={(v) => setInclude(v as 'confirmed' | 'all')} />
             <Button icon={<SearchOutlined />} onClick={() => navigate(`/vehicles?q=${r.plate}`)}>
@@ -129,7 +181,7 @@ export function RoutePage() {
       ) : (
         <div>
           <div className="sg-grid sg-grid-4" style={{ marginBottom: 12 }}>
-            <KpiTile label="Stops" value={r.sightings.length} colour="#1E4DB7" footer={`${r.cameras_count} distinct cameras`} />
+            <KpiTile label="Stops" value={r.sightings.length} colour="#1E4DB7" footer={`${r.cameras_count} distinct camera${r.cameras_count === 1 ? '' : 's'} · one map marker per camera`} />
             <KpiTile label="Distance" value={fmtKm(r.total_distance_km)} colour="#0EA5E9" footer="straight-line legs" />
             <KpiTile label="Duration" value={fmtMinutes(r.total_duration_min)} colour="#16A34A" footer="first to last sighting" />
             <KpiTile label="Plausibility flags" value={r.flags.length} colour={r.flags.length ? '#D97706' : '#16A34A'} footer={r.flags.length ? 'review legs marked amber' : 'all legs plausible'} />
@@ -139,19 +191,26 @@ export function RoutePage() {
               <BaseMap height={420}>
                 {points.length ? <FitBounds points={points} fitKey={r.plate + r.sightings.length} /> : null}
                 {points.length > 1 ? <Polyline positions={points} pathOptions={{ color: '#1E4DB7', weight: 3, opacity: 0.85, dashArray: '2 6' }} /> : null}
-                {r.sightings.filter((s) => s.camera.lat !== null && s.camera.lon !== null).map((s) => (
-                  <Marker key={s.seq} position={[s.camera.lat as number, s.camera.lon as number]} icon={numberedIcon(s.seq, s.match === 'fuzzy')} eventHandlers={{ click: () => setSelected(s.seq) }}>
+                {cameraStops.map((g) => (
+                  <Marker key={g.key} position={[g.camera.lat as number, g.camera.lon as number]} icon={numberedIcon(g.label, g.fuzzy, g.stops.length)} eventHandlers={{ click: () => setSelected(g.stops[0].seq) }}>
                     <Popup>
-                      <div style={{ fontSize: 12 }}>
-                        <div style={{ fontWeight: 600 }}>{s.seq}. {s.camera.name}</div>
-                        <div>{fmtIst(s.first_seen)}</div>
-                        <div>{s.read_count} reads · {Math.round(s.best_conf * 100)} %</div>
+                      <div style={{ fontSize: 12, maxHeight: 220, overflow: 'auto' }}>
+                        <div style={{ fontWeight: 600 }}>{g.camera.name}</div>
+                        <div style={{ color: '#6B7280', marginBottom: 4 }}>{g.stops.length} stop{g.stops.length === 1 ? '' : 's'} at this camera</div>
+                        {g.stops.slice(0, 8).map((s) => (
+                          <div key={s.seq} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '1px 0', cursor: 'pointer' }} onClick={() => setSelected(s.seq)}>
+                            <span className={`sg-route-marker ${s.match === 'fuzzy' ? 'sg-route-marker-fuzzy' : ''}`} style={{ width: 20, height: 20, fontSize: 10 }}>{s.seq}</span>
+                            <span>{fmtIst(s.first_seen)}</span>
+                            <span style={{ color: '#6B7280' }}>{s.read_count} reads · {Math.round(s.best_conf * 100)} %</span>
+                          </div>
+                        ))}
+                        {g.stops.length > 8 ? <div style={{ color: '#6B7280' }}>… and {g.stops.length - 8} more in the timeline</div> : null}
                       </div>
                     </Popup>
                   </Marker>
                 ))}
               </BaseMap>
-              <div style={{ fontSize: 12, color: '#6B7280', padding: '6px 4px 0' }}>Blue markers = exact sightings, amber = confirmed fuzzy candidates. Straight segments, no road routing.</div>
+              <div style={{ fontSize: 12, color: '#6B7280', padding: '6px 4px 0' }}>One marker per camera (numbered by its first stop; the small badge counts repeat stops). Blue = exact reads, amber = confirmed near matches. Straight segments, no road routing.</div>
             </Card>
             <Card size="small" title={`Plausibility (${r.flags.length})`} styles={{ body: { padding: r.flags.length ? 12 : 0, maxHeight: 470, overflow: 'auto' } }}>
               {r.flags.length ? (
@@ -173,11 +232,20 @@ export function RoutePage() {
             </Card>
           </div>
           <Card size="small" title="Timeline" styles={{ body: { padding: 0 } }} style={{ marginBottom: 12 }}>
-            <Table<RouteSighting> size="small" rowKey="seq" pagination={false} dataSource={r.sightings} columns={columns} scroll={{ x: 1100 }} rowClassName={(s) => (s.seq === selected ? 'sg-row-flash' : '')} onRow={(s) => ({ onClick: () => setSelected(s.seq) })} />
+            <Table<RouteSighting>
+              size="small"
+              rowKey="seq"
+              pagination={r.sightings.length > TIMELINE_PAGE ? { current: page, pageSize: TIMELINE_PAGE, size: 'small', showSizeChanger: false, onChange: setPage, showTotal: (t, range) => `stops ${range[0]}–${range[1]} of ${t}` } : false}
+              dataSource={r.sightings}
+              columns={columns}
+              scroll={{ x: 1100 }}
+              rowClassName={(s) => (s.seq === selected ? 'sg-row-flash' : '')}
+              onRow={(s) => rowProps(() => setSelected(s.seq))}
+            />
           </Card>
-          <Card size="small" title="Evidence crops">
+          <Card size="small" title={`Evidence crops (${r.sightings.length})`} extra={r.sightings.length > CROPS_INITIAL ? <Button type="link" size="small" className="sg-no-print" style={{ padding: 0 }} onClick={() => setShowAllCrops((v) => !v)}>{showAllCrops ? `Show first ${CROPS_INITIAL}` : `Show all ${r.sightings.length}`}</Button> : null}>
             <div className="sg-crop-strip">
-              {r.sightings.map((s) => (
+              {(showAllCrops ? r.sightings : r.sightings.slice(0, CROPS_INITIAL)).map((s) => (
                 <div key={s.seq} className="sg-crop-strip-item">
                   <CropThumb src={s.crop_url} alt={`Crop ${s.seq} at ${s.camera.name}`} width={160} height={54} />
                   <div style={{ marginTop: 4 }}>

@@ -20,7 +20,7 @@ export const BRAND = {
   muted: '#9CA3AF',
 } as const;
 
-export type CameraStatus = 'unknown' | 'online' | 'degraded' | 'offline' | 'retired';
+export type CameraStatus = 'unknown' | 'online' | 'degraded' | 'offline' | 'not_streaming' | 'retired';
 export type AlertPriority = 'critical' | 'high' | 'medium' | 'low';
 export type AlertStatus = 'new' | 'acknowledged' | 'closed';
 export type MaintenanceStatus = 'ok' | 'under_maintenance' | 'faulty' | 'decommissioned';
@@ -40,9 +40,36 @@ export const CAMERA_STATUS: Record<CameraStatus, { colour: string; label: string
   online: { colour: '#16A34A', label: 'Online' },
   degraded: { colour: '#D97706', label: 'Degraded' },
   offline: { colour: '#DC2626', label: 'Offline' },
+  // Never delivered a stream (catalogue live=false, or a source that never answered) — not an outage (CONTRACT amendment 2026-09-05 §5.6).
+  not_streaming: { colour: '#6B7280', label: 'Not streaming' },
   unknown: { colour: '#9CA3AF', label: 'Unknown' },
   retired: { colour: '#6B7280', label: 'Retired' },
 };
+
+/**
+ * "Not streaming" presentation: grey, never red. The API status `not_streaming` covers every camera
+ * that has never delivered a stream; when the catalogue `live` flag is `false` the label says so
+ * ("Not streaming (catalogue)") because that is the usual reason on the sandbox.
+ */
+export const CATALOGUE_NOT_STREAMING = {
+  colour: CAMERA_STATUS.not_streaming.colour,
+  label: 'Not streaming (catalogue)',
+  shortLabel: 'Not streaming',
+  hint: 'This camera has never delivered a stream — the catalogue marks it live=false (or the source never answered). The relay does not pull it, so it is neither online nor offline and raises no camera-offline alert.',
+} as const;
+
+/** Status to render for a camera: `not_streaming` when the catalogue says live=false (retired wins), else the API status. */
+export function displayStatus(status: CameraStatus | string, live: boolean | null | undefined): CameraStatus {
+  if (live === false && status !== 'retired') return 'not_streaming';
+  return (status as CameraStatus) in CAMERA_STATUS ? (status as CameraStatus) : 'unknown';
+}
+
+/** Label for a status + live flag pair ("Not streaming (catalogue)" when live=false). */
+export function statusLabel(status: CameraStatus | string, live?: boolean | null): string {
+  const st = displayStatus(status, live);
+  if (st === 'not_streaming' && live === false) return CATALOGUE_NOT_STREAMING.label;
+  return CAMERA_STATUS[st].label;
+}
 
 export const ALERT_PRIORITY: Record<AlertPriority, { colour: string; label: string; rank: number }> = {
   critical: { colour: '#DC2626', label: 'Critical', rank: 0 },
@@ -85,6 +112,19 @@ export const WATCHLIST_REASON: Record<WatchlistReason, { colour: string; label: 
   arrested: { colour: '#7C3AED', label: 'Arrested' },
   unidentified_body: { colour: '#6B7280', label: 'Unidentified body' },
   other: { colour: '#9CA3AF', label: 'Other' },
+};
+
+export type LocationConfidence = 'exact' | 'approx' | 'guess';
+
+/**
+ * Confidence of a camera's coordinates. Organiser-sandbox rows are team-inferred from the camera name alone
+ * (media/cameras_enrichment.README.md): exact = landmark found (~100 m), approx = area/junction (~1 km),
+ * guess = district-HQ fallback or best candidate. Map markers: exact solid, approx dashed ring, guess hollow.
+ */
+export const LOCATION_CONFIDENCE: Record<LocationConfidence, { colour: string; label: string; hint: string; marker: string }> = {
+  exact: { colour: '#16A34A', label: 'Exact', hint: 'Landmark found in OpenStreetMap; the pole is expected within ~100 m', marker: 'solid' },
+  approx: { colour: '#D97706', label: 'Approximate', hint: 'Approximate location (team-inferred): area or junction centre, within ~1 km', marker: 'dashed ring' },
+  guess: { colour: '#6B7280', label: 'Guess', hint: 'Location is a guess (team-inferred): district-headquarters fallback or best candidate; may be tens of km off', marker: 'hollow ring' },
 };
 
 export const EVENT_TYPE: Record<string, { colour: string; label: string }> = {

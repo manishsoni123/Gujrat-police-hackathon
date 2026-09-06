@@ -125,8 +125,8 @@ class HeartbeatCamera(ApiModel):
 
 
 class Heartbeat(ApiModel):
-    worker_id: str = Field(max_length=64)
-    mode: str = "live"
+    worker_id: str = Field(min_length=1, max_length=64)
+    mode: str = Field("live", pattern="^(live|preindex)$")
     version: str = Field("unknown", max_length=32)
     gpu: bool = False
     cpu_flag: bool | None = None

@@ -11,6 +11,11 @@ voted reads it would have POSTed, and scores them against ``plates.json``:
 
     python -m anpr.tools.eval_synthetic --media /media/synthetic --cameras 1 --detector contour
     python -m anpr.tools.eval_synthetic --media /media/synthetic --cameras 1 2 3 --no-realtime   # CPU capacity
+    python -m anpr.tools.eval_synthetic --media /media/synthetic --own-gate                       # own_gate.mp4 only
+
+``--own-gate`` adds ``own_gate.mp4`` (the synthetic private-gate loop, scored against the
+``own_gate`` section of ``plates.json``) under the worker camera id ``plates["own_gate"]["eval_camera_id"]``
+(99). It is reported as ``cam own_gate``.
 
 Exit code 0 when every camera reaches ``--min-accuracy`` (default 0.9), 1 otherwise.
 """
@@ -56,8 +61,16 @@ def run_worker(sources: dict[int, Path], detector: str, realtime: bool, objects:
     return payloads, logs, elapsed
 
 
+def appearances_for(camera_id: int, plates: dict) -> list[dict]:
+    """Ground-truth appearances of one worker camera id; the own gate lives in its own section."""
+    own = plates.get("own_gate")
+    if own and camera_id == own.get("eval_camera_id"):
+        return [{**a, "camera_id": camera_id} for a in own["appearances"]]
+    return [a for a in plates["appearances"] if a["camera_id"] == camera_id]
+
+
 def score(camera_id: int, payloads: list[dict], plates: dict, vote_window: float) -> dict:
-    apps = [a for a in plates["appearances"] if a["camera_id"] == camera_id]
+    apps = appearances_for(camera_id, plates)
     reads = [r for p in payloads if p["camera_id"] == camera_id for r in p["reads"]]
     matched, missed, details = 0, [], []
     used: set[int] = set()
@@ -92,7 +105,8 @@ def score(camera_id: int, payloads: list[dict], plates: dict, vote_window: float
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--media", default=os.environ.get("SYNTH_OUT", "/media/synthetic"))
-    parser.add_argument("--cameras", type=int, nargs="+", default=[1])
+    parser.add_argument("--cameras", type=int, nargs="*", default=None, help="stream camera ids (default: 1, or none with --own-gate)")
+    parser.add_argument("--own-gate", action="store_true", help="also score own_gate.mp4 (plates.json 'own_gate' section)")
     parser.add_argument("--detector", default="contour", choices=["auto", "onnx", "contour"])
     parser.add_argument("--no-realtime", action="store_true", help="decode as fast as possible (throughput measurement)")
     parser.add_argument("--objects", action="store_true", help="keep YOLOX counting on (default off for a clean OCR number)")
@@ -104,21 +118,33 @@ def main(argv: list[str] | None = None) -> int:
 
     media = Path(args.media)
     plates = json.loads((media / "plates.json").read_text(encoding="utf-8"))
+    if args.cameras is None:
+        args.cameras = [] if args.own_gate else [1]
     sources = {cid: media / f"cam_{cid}.mp4" for cid in args.cameras}
+    names = {cid: str(cid) for cid in args.cameras}
+    if args.own_gate:
+        own = plates.get("own_gate")
+        if not own:
+            print("plates.json has no 'own_gate' section; regenerate media/synthetic (make synthetic)", file=sys.stderr)
+            return 2
+        sources[int(own["eval_camera_id"])] = media / own["file"]
+        names[int(own["eval_camera_id"])] = "own_gate"
+    if not sources:
+        parser.error("nothing to score: give --cameras and/or --own-gate")
     for path in sources.values():
         if not path.exists():
             print(f"missing {path}", file=sys.stderr)
             return 2
-    print(f"running worker: detector={args.detector} realtime={not args.no_realtime} cameras={args.cameras}")
+    print(f"running worker: detector={args.detector} realtime={not args.no_realtime} cameras={list(names.values())}")
     payloads, logs, elapsed = run_worker(sources, args.detector, not args.no_realtime, args.objects, {}, args.timeout)
     stats = [m for m in (STATS_RE.search(l) for l in logs) if m]
     last = stats[-1] if stats else None
-    results = [score(cid, payloads, plates, args.vote_window) for cid in args.cameras]
+    results = [{**score(cid, payloads, plates, args.vote_window), "camera": names[cid]} for cid in sources]
     ok = True
     for r in results:
         flag = "PASS" if r["accuracy"] >= args.min_accuracy else "FAIL"
         ok &= r["accuracy"] >= args.min_accuracy
-        print(f"cam {r['camera_id']}: {r['matched']}/{r['appearances']} appearances read exactly "
+        print(f"cam {r['camera']}: {r['matched']}/{r['appearances']} appearances read exactly "
               f"({r['accuracy'] * 100:.1f} %), {r['reads']} voted reads, {len(r['false_reads'])} false -> {flag}")
         for m in r["missed"]:
             print(f"    missed {m['plate']} @ {m['start_s']}s two_line={m['two_line']} reads_in_window={m['reads_in_window']}")

@@ -1,10 +1,11 @@
 {
-  "generated_at": "2026-09-04T20:27:51Z",
+  "generated_at": "2026-09-05T04:57:11Z",
   "seed": 42,
   "width": 1280,
   "height": 720,
   "fps": 10,
   "loop_seconds": 90,
+  "osd": "bottom-right strip '<camera> \u00b7 loop mm:ss.d' (loop position, not a wall clock)",
   "cameras": [
     {
       "id": 1,
@@ -55,6 +56,146 @@
       "label": "Koba Circle Highway"
     }
   ],
+  "own_gate": {
+    "file": "own_gate.mp4",
+    "codec": "H264",
+    "label": "Dynatech Office Gate",
+    "eval_camera_id": 99,
+    "mediamtx_path": "own_gate",
+    "external_id": "OWN-GATE-01",
+    "shared_with_streams": [
+      {
+        "plate": "GJ01AB1234",
+        "display": "GJ 01 AB 1234",
+        "start_s": 10.0,
+        "stream_cameras": [
+          1,
+          3,
+          6,
+          2
+        ]
+      },
+      {
+        "plate": "GJ27XY3456",
+        "display": "GJ 27 XY 3456",
+        "start_s": 28.0,
+        "stream_cameras": [
+          6,
+          3,
+          7,
+          4
+        ]
+      }
+    ],
+    "plates": [
+      {
+        "plate": "GJ01AB1234",
+        "display": "GJ 01 AB 1234",
+        "two_line": false,
+        "shared": true
+      },
+      {
+        "plate": "GJ27XY3456",
+        "display": "GJ 27 XY 3456",
+        "two_line": false,
+        "shared": true
+      },
+      {
+        "plate": "GJ01JZ8645",
+        "display": "GJ 01 JZ 8645",
+        "two_line": true,
+        "shared": false
+      },
+      {
+        "plate": "GJ16K6921",
+        "display": "GJ 16 K 6921",
+        "two_line": false,
+        "shared": false
+      },
+      {
+        "plate": "GJ21S5699",
+        "display": "GJ 21 S 5699",
+        "two_line": false,
+        "shared": false
+      },
+      {
+        "plate": "GJ24AU3346",
+        "display": "GJ 24 AU 3346",
+        "two_line": true,
+        "shared": false
+      },
+      {
+        "plate": "GJ25LS8566",
+        "display": "GJ 25 LS 8566",
+        "two_line": false,
+        "shared": false
+      },
+      {
+        "plate": "GJ28C2131",
+        "display": "GJ 28 C 2131",
+        "two_line": false,
+        "shared": false
+      }
+    ],
+    "appearances": [
+      {
+        "plate": "GJ01AB1234",
+        "start_s": 10.0,
+        "end_s": 14.0,
+        "two_line": false,
+        "direction": "ltr"
+      },
+      {
+        "plate": "GJ27XY3456",
+        "start_s": 28.0,
+        "end_s": 32.0,
+        "two_line": false,
+        "direction": "rtl"
+      },
+      {
+        "plate": "GJ24AU3346",
+        "start_s": 37.0,
+        "end_s": 41.0,
+        "two_line": true,
+        "direction": "ltr"
+      },
+      {
+        "plate": "GJ25LS8566",
+        "start_s": 49.0,
+        "end_s": 53.0,
+        "two_line": false,
+        "direction": "rtl"
+      },
+      {
+        "plate": "GJ28C2131",
+        "start_s": 61.0,
+        "end_s": 65.0,
+        "two_line": false,
+        "direction": "rtl"
+      },
+      {
+        "plate": "GJ01JZ8645",
+        "start_s": 73.0,
+        "end_s": 77.0,
+        "two_line": true,
+        "direction": "ltr"
+      },
+      {
+        "plate": "GJ16K6921",
+        "start_s": 79.0,
+        "end_s": 83.0,
+        "two_line": false,
+        "direction": "rtl"
+      },
+      {
+        "plate": "GJ21S5699",
+        "start_s": 85.0,
+        "end_s": 89.0,
+        "two_line": false,
+        "direction": "rtl"
+      }
+    ]
+  },
   "plates": [
     {
       "plate": "22BH4321AA",

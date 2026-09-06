@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from app.core.urlguard import check_outbound_url
 from app.services import settings_service as cfg
 
 log = logging.getLogger("sentinel.catalogue")
@@ -132,11 +133,18 @@ async def fetch_catalogue(config: CatalogueConfig) -> tuple[list[dict[str, Any]]
     """Return (items, http_status, duration_ms). Raises CatalogueError on failure."""
     started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=config.timeout_s, follow_redirects=True) as client:
+        check_outbound_url(config.ingest_url)  # use-time SSRF guard (the saved value was validated too)
+    except ValueError as exc:
+        raise CatalogueError(f"catalogue {config.ingest_url} rejected: {exc}") from exc
+    try:
+        # redirects are not followed: a 3xx to an internal host would bypass the guard; the operator sets the final URL
+        async with httpx.AsyncClient(timeout=config.timeout_s, follow_redirects=False) as client:
             r = await client.get(config.ingest_url, headers=config.headers())
     except httpx.HTTPError as exc:
         raise CatalogueError(f"catalogue {config.ingest_url} unreachable: {exc.__class__.__name__}: {exc}") from exc
     duration = int((time.perf_counter() - started) * 1000)
+    if 300 <= r.status_code < 400:
+        raise CatalogueError(f"catalogue {config.ingest_url} redirected (HTTP {r.status_code}) to {r.headers.get('location', '?')}; set catalogue.base_url to the final URL", r.status_code)
     if r.status_code >= 300:
         raise CatalogueError(f"catalogue {config.ingest_url} returned HTTP {r.status_code}", r.status_code)
     try:

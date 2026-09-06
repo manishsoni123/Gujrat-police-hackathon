@@ -16,32 +16,59 @@ from app.services.route_builder import RoutePoint, build_route
 from app.services.scope import in_scope_condition
 
 
+def _exact_filters(plate_norm: str, t_from: datetime, t_to: datetime, scope: Scope, camera_id: int | None, department_id: int | None) -> list:
+    conds = [Sighting.plate_norm == plate_norm, Sighting.first_seen >= t_from, Sighting.first_seen <= t_to]
+    cond = in_scope_condition(scope, Sighting.camera_id)
+    if cond is not None:
+        conds.append(cond)
+    if camera_id:
+        conds.append(Sighting.camera_id == camera_id)
+    if department_id:
+        conds.append(Camera.department_id == department_id)
+    return conds
+
+
 async def exact_sightings(
     db: AsyncSession, plate_norm: str, t_from: datetime, t_to: datetime, scope: Scope,
-    camera_id: int | None = None, department_id: int | None = None, limit: int = 200,
+    camera_id: int | None = None, department_id: int | None = None, limit: int = 200, order: str = "asc",
 ) -> list[tuple[Sighting, Camera]]:
+    """Exact sightings in the window. `order='desc'` (search) shows the most recent first; the route keeps `asc`."""
     q = (
         select(Sighting, Camera)
         .join(Camera, Camera.id == Sighting.camera_id)
-        .where(Sighting.plate_norm == plate_norm, Sighting.first_seen >= t_from, Sighting.first_seen <= t_to)
-        .order_by(Sighting.first_seen.asc())
+        .where(*_exact_filters(plate_norm, t_from, t_to, scope, camera_id, department_id))
+        .order_by(Sighting.first_seen.desc() if order == "desc" else Sighting.first_seen.asc(), Sighting.id.asc())
         .limit(limit)
     )
-    cond = in_scope_condition(scope, Sighting.camera_id)
-    if cond is not None:
-        q = q.where(cond)
-    if camera_id:
-        q = q.where(Sighting.camera_id == camera_id)
-    if department_id:
-        q = q.where(Camera.department_id == department_id)
     return [(s, c) for s, c in (await db.execute(q)).all()]
+
+
+async def exact_totals(
+    db: AsyncSession, plate_norm: str, t_from: datetime, t_to: datetime, scope: Scope,
+    camera_id: int | None = None, department_id: int | None = None,
+) -> tuple[int, set[int]]:
+    """(total exact sightings, distinct camera ids) over the **uncapped** window."""
+    q = (
+        select(Sighting.camera_id, func.count())
+        .select_from(Sighting)
+        .join(Camera, Camera.id == Sighting.camera_id)
+        .where(*_exact_filters(plate_norm, t_from, t_to, scope, camera_id, department_id))
+        .group_by(Sighting.camera_id)
+    )
+    rows = (await db.execute(q)).all()
+    return sum(int(n) for _cid, n in rows), {int(cid) for cid, _n in rows}
 
 
 async def fuzzy_sightings(
     db: AsyncSession, plate_norm: str, t_from: datetime, t_to: datetime, scope: Scope,
     exclude_ids: set[int], camera_id: int | None = None, department_id: int | None = None, limit: int = 200,
+    total_out: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Reads with levenshtein ≤ 2 or trigram similarity > 0.6, grouped by sighting, scored."""
+    """Reads with levenshtein ≤ 2 or trigram similarity > 0.6, grouped by sighting, scored.
+
+    Sightings whose own `plate_norm` equals the query are never fuzzy candidates (they are the
+    exact set, capped or not); `total_out['fuzzy_total']` receives the uncapped candidate count.
+    """
     dist = func.levenshtein(PlateRead.plate_norm, plate_norm)
     sim = func.similarity(PlateRead.plate_raw, plate_norm)
     q = (
@@ -51,11 +78,12 @@ async def fuzzy_sightings(
             func.max(sim).label("similarity"),
             func.max(PlateRead.confidence).label("best_conf"),
         )
+        .join(Sighting, Sighting.id == PlateRead.sighting_id)
         .where(
             PlateRead.captured_at >= t_from,
             PlateRead.captured_at <= t_to,
-            PlateRead.sighting_id.isnot(None),
             PlateRead.plate_norm != plate_norm,
+            Sighting.plate_norm != plate_norm,
             (dist <= 2) | (sim > 0.6),
         )
         .group_by(PlateRead.sighting_id)
@@ -76,6 +104,8 @@ async def fuzzy_sightings(
         score = (1 - min(distance, 3) / 3) * 0.7 + float(r.best_conf or 0) * 0.3
         cands.append({"sighting_id": r.sid, "distance": distance, "similarity": round(float(r.similarity or 0), 3), "score": round(score, 3)})
     cands.sort(key=lambda c: (-c["score"], c["sighting_id"]))
+    if total_out is not None:
+        total_out["fuzzy_total"] = len(cands)
     cands = cands[:limit]
     if not cands:
         return []
@@ -125,18 +155,22 @@ async def search(
     db: AsyncSession, plate_norm: str, t_from: datetime, t_to: datetime, scope: Scope,
     camera_id: int | None, department_id: int | None, limit: int,
 ) -> dict[str, Any]:
-    exact = await exact_sightings(db, plate_norm, t_from, t_to, scope, camera_id, department_id, limit)
+    # most recent exact sightings first (the operator wants the latest, not the 50 oldest of 1 100)
+    exact = await exact_sightings(db, plate_norm, t_from, t_to, scope, camera_id, department_id, limit, order="desc")
+    exact_total, exact_cams = await exact_totals(db, plate_norm, t_from, t_to, scope, camera_id, department_id)
     exact_items = []
     for s, cam in exact:
         item = serializers.sighting_item(s, cam)
         item.update({"match": "exact", "score": 1.0, "confirmation": None})
         exact_items.append(item)
-    fuzzy_items = await fuzzy_sightings(db, plate_norm, t_from, t_to, scope, {s.id for s, _ in exact}, camera_id, department_id, limit)
+    totals: dict[str, int] = {}
+    fuzzy_items = await fuzzy_sightings(db, plate_norm, t_from, t_to, scope, {s.id for s, _ in exact}, camera_id, department_id, limit, total_out=totals)
     conf = await confirmations_for(db, plate_norm, [f["id"] for f in fuzzy_items] + [e["id"] for e in exact_items])
     for it in exact_items + fuzzy_items:
         it["confirmation"] = conf.get(it["id"])
-    cams = {it["camera"]["id"] for it in exact_items} | {it["camera"]["id"] for it in fuzzy_items if it.get("confirmation") == "confirmed"}
-    return {"exact": exact_items, "fuzzy": fuzzy_items, "cameras_seen": len(cams)}
+    # cameras_seen: every camera of the uncapped exact set plus cameras of confirmed fuzzy candidates
+    cams = exact_cams | {it["camera"]["id"] for it in fuzzy_items if it.get("confirmation") == "confirmed"}
+    return {"exact": exact_items, "fuzzy": fuzzy_items, "cameras_seen": len(cams), "exact_total": exact_total, "fuzzy_total": totals.get("fuzzy_total", len(fuzzy_items)), "limit": limit}
 
 
 async def route(

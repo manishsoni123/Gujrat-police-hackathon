@@ -15,7 +15,8 @@ import { camerasApi, detectionsApi, eventsApi, objectsApi } from '@/api';
 import type { Detection, EventItem } from '@/api/types';
 import { useReadsSocket } from '@/ws/useReadsSocket';
 import { useHealthSocket } from '@/ws/useHealthSocket';
-import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolTag, AmcTag } from '@/components/Tags';
+import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolTag, AmcTag, LocationConfidenceTag, WatchlistHitTag, codecLabel } from '@/components/Tags';
+import { rowProps } from '@/hooks/useListQuery';
 import { IstTime } from '@/components/IstTime';
 import { PlateText } from '@/components/PlateText';
 import { ConfidenceBar, CropThumb } from '@/components/Misc';
@@ -50,7 +51,7 @@ function LiveReadsList({ reads, connected }: { reads: Detection[]; connected: bo
       dataSource={reads}
       scroll={{ y: 520 }}
       rowClassName={(r) => (r.watchlist_hit ? 'sg-row-new' : '')}
-      onRow={(r) => ({ onClick: () => (r.id < 20_000 ? navigate(`/detections?id=${r.id}`) : undefined), style: { cursor: r.id < 20_000 ? 'pointer' : 'default' } })}
+      onRow={(r) => rowProps(() => navigate(`/detections?id=${r.id}`))}
       columns={[
         { title: 'Crop', dataIndex: 'crop_url', width: 108, render: (u: string | null, r) => <CropThumb src={u} alt={`Plate crop ${r.plate_display}`} sha256={r.crop_sha256} width={90} height={36} /> },
         {
@@ -59,7 +60,7 @@ function LiveReadsList({ reads, connected }: { reads: Detection[]; connected: bo
           render: (p: string, r) => (
             <div>
               <PlateText plate={p} raw={r.plate_raw} invalid={!r.is_valid_format} />
-              {r.watchlist_hit ? <div style={{ marginTop: 3 }}><Tag color="red" style={{ margin: 0, fontSize: 11, lineHeight: '16px' }}>watchlist hit</Tag></div> : null}
+              {r.watchlist_hit ? <div style={{ marginTop: 3 }}><WatchlistHitTag /></div> : null}
             </div>
           ),
         },
@@ -166,7 +167,7 @@ export function CameraDetailPage() {
         docTitle={`${c.name} · Camera`}
         description={
           <Space size={6} wrap>
-            <StatusTag status={c.status} size="small" />
+            <StatusTag status={c.status} live={c.live} size="small" />
             <MaintenanceTag status={c.maintenance_status} size="small" />
             <DepartmentTag code={c.department_code} name={c.department_name} size="small" />
             <CodecTag codec={c.codec} />
@@ -206,18 +207,25 @@ export function CameraDetailPage() {
               <Descriptions.Item label="Relay path">
                 <code>{c.relay_path ?? '—'}</code>
               </Descriptions.Item>
-              <Descriptions.Item label="Stream">{c.codec} · {c.resolution ?? '—'} · {c.fps ?? '—'} fps</Descriptions.Item>
+              <Descriptions.Item label="Stream">{codecLabel(c.codec)} · {c.resolution ?? '—'} · {c.fps ?? '—'} fps</Descriptions.Item>
               <Descriptions.Item label="Type / ownership">{cameraTypeLabel(c.type)} · {humanise(c.ownership)}</Descriptions.Item>
               <Descriptions.Item label="Source">{humanise(c.source)}</Descriptions.Item>
               <Descriptions.Item label="Address" span={2}>{c.address ?? '—'}</Descriptions.Item>
               <Descriptions.Item label="Coordinates">{fmtLatLon(c.lat, c.lon)}</Descriptions.Item>
               <Descriptions.Item label="Heading / FoV">{fmtHeadingFov(c.heading_deg, c.fov_deg)}</Descriptions.Item>
+              {c.location_confidence || c.metadata?.enrichment ? (
+                <Descriptions.Item label="Location confidence" span={2}>
+                  <LocationConfidenceTag confidence={c.location_confidence} />
+                  {c.metadata?.enrichment?.source ? <span style={{ marginLeft: 8, fontSize: 12, color: '#6B7280' }}>source: {c.metadata.enrichment.source}</span> : null}
+                  {c.metadata?.enrichment?.notes ? <div style={{ marginTop: 4, fontSize: 12, color: '#4B5563' }}>{c.metadata.enrichment.notes}</div> : null}
+                </Descriptions.Item>
+              ) : null}
               <Descriptions.Item label="Connectivity">{c.connectivity_type ? c.connectivity_type.toUpperCase() : '—'}{c.bandwidth_kbps ? ` · ${c.bandwidth_kbps} kbps` : ''}</Descriptions.Item>
               <Descriptions.Item label="Storage">{c.storage_location ?? '—'}{c.retention_days != null ? ` · ${c.retention_days} d` : ''}</Descriptions.Item>
               <Descriptions.Item label="Vendor / model">{c.vendor ?? '—'}{c.model ? ` · ${c.model}` : ''}</Descriptions.Item>
               <Descriptions.Item label="Installed">{fmtIstDate(c.install_date)}{c.age_years != null ? ` (${c.age_years.toFixed(1)} y)` : ''}</Descriptions.Item>
               <Descriptions.Item label="AMC"><AmcTag status={c.amc_status} size="small" /></Descriptions.Item>
-              <Descriptions.Item label="Catalogue live"><BoolTag value={c.live} /></Descriptions.Item>
+              <Descriptions.Item label="Catalogue live"><BoolTag value={c.live} yes="Yes" no="No (not streaming)" /></Descriptions.Item>
               <Descriptions.Item label="Uptime 24 h">{fmtPct(c.uptime_24h_pct)}</Descriptions.Item>
               <Descriptions.Item label="Last seen"><IstTime value={c.last_seen_at} /></Descriptions.Item>
               <Descriptions.Item label="Reads / sightings 24 h">{c.reads_24h} / {c.sightings_24h}</Descriptions.Item>

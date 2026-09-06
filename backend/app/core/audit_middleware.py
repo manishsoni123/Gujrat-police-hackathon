@@ -24,7 +24,23 @@ from app.services.audit import action_for_route, client_ip, write_audit
 log = logging.getLogger("sentinel.http")
 
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
-_SKIP_PREFIXES = ("/api/internal/", "/api/auth/verify", "/api/mock-sandbox/", "/api/docs", "/api/openapi.json", "/api/redoc")
+# No trailing slashes: `/api/internal` (no slash, 404) must be skipped like `/api/internal/...`.
+_SKIP_PREFIXES = ("/api/internal", "/api/auth/verify", "/api/mock-sandbox", "/api/docs", "/api/openapi.json", "/api/redoc", "/api/healthz")
+
+
+def should_audit(method: str, path: str, has_audit: bool, route_matched: bool, status: int) -> bool:
+    """Pure decision (tested): mutations under /api on a **matched** route, or GETs the handler marked."""
+    if not path.startswith("/api/"):
+        return False
+    if path.startswith(_SKIP_PREFIXES):
+        return False
+    if method in ("OPTIONS", "HEAD"):
+        return False
+    if method not in _MUTATING and not has_audit:
+        return False
+    if not route_matched and status == 404:
+        return False  # unmatched route: nothing happened, no synthetic 'post.api.x' action (CONTRACT §4.4)
+    return True
 
 
 def _plain(obj: Any, attr: str) -> Any:
@@ -115,18 +131,11 @@ class AuditMiddleware:
             },
         )
 
-        if not path.startswith("/api/"):
-            return
-        if any(path.startswith(p) for p in _SKIP_PREFIXES):
-            return
         if audit and audit.get("skip"):
             return
-        if method not in _MUTATING and not audit:
-            return
-        if method == "OPTIONS" or method == "HEAD":
-            return
-
         route = self._resolve_route(scope)
+        if not should_audit(method, path, bool(audit), route is not None, status):
+            return
         route_path = getattr(route, "path", None)
         action = (audit or {}).get("action") or action_for_route(method, route_path, path)
         if action is None:

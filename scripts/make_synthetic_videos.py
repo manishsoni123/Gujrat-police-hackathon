@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Generate the synthetic "sandbox" camera videos and their ground truth (CONTRACT.md section 12.4).
 
-Writes ``cam_<n>.mp4`` (1280x720, 10 fps, 90 s; camera 8 in H.265) and ``plates.json`` into
-``SYNTH_OUT`` (default ``/media/synthetic``). Deterministic for a given ``SYNTH_SEED``: the plate
-set and schedule are reproduced byte-for-byte in ``plates.json`` except ``generated_at``.
+Writes ``cam_<n>.mp4`` (1280x720, 10 fps, 90 s; camera 8 in H.265), ``own_gate.mp4`` (the
+synthetic stand-in for the team's private society-gate camera: its own scene colour, gate
+pillars and boom, and its own plate set that shares **exactly two** plates with cameras 1-3 so
+the "two systems" route demo works on the laptop) and ``plates.json`` into ``SYNTH_OUT``
+(default ``/media/synthetic``). Deterministic for a given ``SYNTH_SEED``: the plate set and
+schedule are reproduced byte-for-byte in ``plates.json`` except ``generated_at``.
 
     python scripts/make_synthetic_videos.py [--cameras 8] [--seconds 90] [--seed 42] [--out DIR]
+    python scripts/make_synthetic_videos.py --only 99        # re-render only own_gate.mp4 (id 99)
+
+Burnt-in overlay: a small grey OSD strip at the bottom-right, ``cam 1 · sachivalaya gate 1 ·
+loop 00:12.3`` (loop position, not a wall clock, so it never contradicts the portal's IST
+header), kept away from the player's title chip (top-left) and caption (bottom-left).
 
 Dependencies: numpy, opencv-python-headless, Pillow, an ``ffmpeg`` binary with libx264 (and
 libx265 for camera 8; falls back to libx264 and records ``"codec": "H264"``), DejaVu Sans Bold
@@ -24,7 +32,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -71,6 +79,21 @@ PALETTE = [
     ((130, 60, 60), (210, 160, 150)), ((80, 80, 80), (170, 170, 180)),
 ]
 VEHICLE_COLOURS = [(35, 35, 40), (25, 40, 70), (60, 25, 25), (30, 55, 35), (45, 45, 45), (20, 30, 55), (55, 40, 20)]
+
+# Our own private society-gate camera (CONTRACT section 12.3 "Own camera", MediaMTX path `own_gate`).
+# Served by deploy/mediamtx.yml when media/own/own_gate.mp4 (the real phone recording) is absent.
+# Its scene (dusk green-grey, gate pillars, striped boom) is unlike every stream/<n> palette and its
+# plate set is disjoint from the sandbox cameras' except for OWN_GATE_SHARED: exactly two plates
+# that also pass cameras 1-3 (the laptop's live ANPR set), so a route query shows the vehicle on
+# sandbox cameras and on the own feed - the "two systems" demo. GJ27XY3456 (not active in the
+# watchlist; Video 1 adds it live) is visible at 28-32 s; GJ01AB1234 (stolen/critical) at 10-14 s.
+OWN_GATE_EVAL_ID = 99            # camera id used by `--only 99` and anpr.tools.eval_synthetic --own-gate
+OWN_GATE_FILE = "own_gate.mp4"
+OWN_GATE_LABEL = "Dynatech Office Gate"
+OWN_GATE_HUD = "own gate · dynatech office gate"
+OWN_GATE_PALETTE = ((38, 62, 58), (128, 158, 138))
+OWN_GATE_SHARED: list[tuple[str, bool, float]] = [("GJ01AB1234", False, 10.0), ("GJ27XY3456", False, 28.0)]
+OWN_GATE_FILLERS = 6             # own plates never seen on any stream/<n> camera (~2 two-line)
 
 SERIES_LETTERS = "ABCDEFGHJKLMNPRSTUVWXYZ"   # no I, O, Q
 FONT_CANDIDATES = [
@@ -132,11 +155,11 @@ def random_gujarat_plate(rng: random.Random) -> str:
 # Schedule
 # ---------------------------------------------------------------------------
 class Schedule:
-    def __init__(self, cameras: int, seconds: float, rng: random.Random) -> None:
+    def __init__(self, cameras: int, seconds: float, rng: random.Random, ids: list[int] | None = None) -> None:
         self.cameras = cameras
         self.seconds = seconds
         self.rng = rng
-        self.by_camera: dict[int, list[Appearance]] = {c: [] for c in range(1, cameras + 1)}
+        self.by_camera: dict[int, list[Appearance]] = {c: [] for c in (ids if ids is not None else range(1, cameras + 1))}
         self.specs: dict[str, PlateSpec] = {}
 
     def _overlaps(self, camera: int, start: float) -> bool:
@@ -237,6 +260,35 @@ def build_schedule(cameras: int, seconds: float, seed: int) -> Schedule:
     return sched
 
 
+def build_own_gate_schedule(seconds: float, seed: int, sandbox_plates: set[str]) -> Schedule:
+    """Own-gate loop: the two shared plates at fixed times plus OWN_GATE_FILLERS plates seen nowhere else.
+
+    Independent RNG stream (``seed * 7919 + 1``) so the sandbox schedule and the own-gate schedule
+    never shift each other. Raises when the "exactly two shared plates" rule would be broken.
+    """
+    rng = random.Random(seed * 7919 + 1)
+    sched = Schedule(0, seconds, rng, ids=[OWN_GATE_EVAL_ID])
+    shared = {p for p, _tl, _s in OWN_GATE_SHARED}
+    for plate, two_line, start in OWN_GATE_SHARED:
+        sched.add(plate, two_line, True, OWN_GATE_EVAL_ID, start)
+    taken = set(WATCHLIST_SEED) | set(sandbox_plates) | shared
+    fillers: list[str] = []
+    while len(fillers) < OWN_GATE_FILLERS:
+        p = random_gujarat_plate(rng)
+        if p not in taken:
+            taken.add(p)
+            fillers.append(p)
+    for i, plate in enumerate(fillers):
+        slots = sched.free_slots(OWN_GATE_EVAL_ID, -1.0)
+        if not slots:
+            break
+        sched.add(plate, i % 3 == 1, False, OWN_GATE_EVAL_ID, rng.choice(slots))
+    overlap = set(sched.specs) & set(sandbox_plates)
+    if overlap != shared:
+        raise RuntimeError(f"own_gate must share exactly {sorted(shared)} with the sandbox cameras, got {sorted(overlap)}")
+    return sched
+
+
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
@@ -301,9 +353,14 @@ class PlateRenderer:
         return arr
 
 
-def make_background(camera: int, label: str, font: ImageFont.FreeTypeFont) -> np.ndarray:
-    """Static RGB background: gradient sky, grey road band with a dashed lane line, camera label."""
-    top, bottom = PALETTE[(camera - 1) % len(PALETTE)]
+def make_background(palette: tuple[tuple[int, int, int], tuple[int, int, int]], gate: bool = False) -> np.ndarray:
+    """Static RGB background: gradient sky, grey road band with a dashed lane line; gate pillars + boom for the own feed.
+
+    No text lives here any more: the OSD strip (camera name + loop position) is drawn per frame at
+    the bottom-right by ``render_camera`` so it neither hides under the player's title chip
+    (top-left) nor contradicts the portal's IST clock.
+    """
+    top, bottom = palette
     t = np.linspace(0.0, 1.0, HEIGHT, dtype=np.float32)[:, None, None]
     bg = (np.array(top, dtype=np.float32) * (1 - t) + np.array(bottom, dtype=np.float32) * t)
     bg = np.repeat(bg, WIDTH, axis=1).astype(np.uint8)
@@ -312,9 +369,33 @@ def make_background(camera: int, label: str, font: ImageFont.FreeTypeFont) -> np
     lane_y = (ROAD_TOP + ROAD_BOTTOM) // 2
     for x in range(20, WIDTH, 120):
         bg[lane_y - 3:lane_y + 3, x:x + 60] = (175, 175, 175)
-    pil = Image.fromarray(bg)
+    if gate:
+        # Society gate: two pillars at the frame edges, a raised red/white boom across the top of the road,
+        # a compound wall behind it. Dark and unstriped where plates go, so the contour detector is unaffected.
+        bg[ROAD_TOP - 150:ROAD_TOP, :] = (150, 140, 125)                     # compound wall
+        for y in range(ROAD_TOP - 150, ROAD_TOP, 30):                         # brick courses
+            bg[y:y + 2, :] = (120, 110, 95)
+        for x0 in (0, WIDTH - 70):
+            bg[ROAD_TOP - 230:ROAD_TOP + 4, x0:x0 + 70] = (95, 85, 75)         # pillars
+            bg[ROAD_TOP - 240:ROAD_TOP - 230, x0 - 5 if x0 else 0:x0 + 75] = (60, 55, 50)   # caps
+        boom_y = ROAD_TOP - 200
+        seg = 48                                                              # < ANPR_MIN_PLATE_W after the 960 px decode, so the white segments are never plate candidates
+        for i, x in enumerate(range(70, WIDTH - 70, seg)):
+            bg[boom_y:boom_y + 14, x:min(x + seg, WIDTH - 70)] = (200, 55, 45) if i % 2 == 0 else (225, 225, 225)
+    return bg
+
+
+def draw_osd(frame: np.ndarray, hud: str, t: float, font: ImageFont.FreeTypeFont) -> np.ndarray:
+    """Bottom-right OSD strip: ``<hud> · loop mm:ss.d`` in small grey on a dark box (RGB in, RGB out)."""
+    text = f"{hud} · loop {int(t // 60):02d}:{int(t % 60):02d}.{int((t * 10) % 10)}"
+    pil = Image.fromarray(frame)
     draw = ImageDraw.Draw(pil)
-    draw.text((24, 18), f"cam {camera} · {label.lower()}", font=font, fill=(235, 205, 90))
+    box = font.getbbox(text)
+    tw, th = box[2] - box[0], box[3] - box[1]
+    x1, y1 = WIDTH - 10, HEIGHT - 8
+    x0, y0 = x1 - tw - 16, y1 - th - 10
+    draw.rectangle([x0, y0, x1, y1], fill=(28, 28, 30))
+    draw.text((x0 + 8 - box[0], y0 + 5 - box[1]), text, font=font, fill=(175, 175, 175))     # below the contour detector's 190 brightness threshold
     return np.asarray(pil, dtype=np.uint8)
 
 
@@ -363,12 +444,12 @@ def has_encoder(ffmpeg: str, name: str) -> bool:
     return any(line.split()[1:2] == [name] for line in out.stdout.splitlines() if line.strip())
 
 
-def render_camera(camera: int, label: str, apps: list[Appearance], seconds: float, seed: int, out_path: Path,
-                  codec: str, ffmpeg: str, plates: PlateRenderer, clock_origin: datetime) -> str:
-    """Render one camera; returns the codec actually used."""
-    label_font = load_font(28)
-    clock_font = load_font(26)
-    background = make_background(camera, label, label_font)
+def render_camera(camera: int, hud: str, apps: list[Appearance], seconds: float, seed: int, out_path: Path,
+                  codec: str, ffmpeg: str, plates: PlateRenderer,
+                  palette: tuple[tuple[int, int, int], tuple[int, int, int]] | None = None, gate: bool = False) -> str:
+    """Render one camera (``camera`` = OWN_GATE_EVAL_ID for the own feed); returns the codec actually used."""
+    osd_font = load_font(18)
+    background = make_background(palette or PALETTE[(camera - 1) % len(PALETTE)], gate=gate)
     rng = np.random.default_rng(seed * 1000 + camera)
     noise_planes = [rng.normal(0.0, NOISE_SIGMA, (HEIGHT, WIDTH, 3)).astype(np.int16) for _ in range(6)]
     use_codec = codec
@@ -404,10 +485,7 @@ def render_camera(camera: int, label: str, apps: list[Appearance], seconds: floa
                 paste(frame, plate_img, px, py)
             noisy = frame.astype(np.int16) + np.roll(noise_planes[i % len(noise_planes)], (i * 37) % WIDTH, axis=1)
             frame = np.clip(noisy, 0, 255).astype(np.uint8)
-            pil = Image.fromarray(frame)
-            stamp = (clock_origin + timedelta(seconds=t)).strftime("%H:%M:%S.%f")[:-5]
-            ImageDraw.Draw(pil).text((WIDTH - 190, 18), stamp, font=clock_font, fill=(120, 230, 235))
-            proc.stdin.write(np.asarray(pil, dtype=np.uint8).tobytes())
+            proc.stdin.write(draw_osd(frame, hud, t, osd_font).tobytes())
     finally:
         proc.stdin.close()
         rc = proc.wait()
@@ -426,7 +504,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seconds", type=float, default=float(os.environ.get("SYNTH_SECONDS", "90")))
     parser.add_argument("--seed", type=int, default=int(os.environ.get("SYNTH_SEED", "42")))
     parser.add_argument("--out", default=os.environ.get("SYNTH_OUT", "/media/synthetic"))
-    parser.add_argument("--only", type=int, action="append", default=[], help="render only these camera ids (schedule unchanged)")
+    parser.add_argument("--only", type=int, action="append", default=[],
+                        help=f"render only these camera ids (schedule unchanged); {OWN_GATE_EVAL_ID} = own_gate.mp4")
+    parser.add_argument("--no-own-gate", action="store_true", help="skip own_gate.mp4")
     parser.add_argument("--ffmpeg", default=shutil.which("ffmpeg") or "ffmpeg")
     args = parser.parse_args(argv)
 
@@ -440,8 +520,9 @@ def main(argv: list[str] | None = None) -> int:
 
     started = time.monotonic()
     sched = build_schedule(args.cameras, args.seconds, args.seed)
+    own = None if args.no_own_gate else build_own_gate_schedule(args.seconds, args.seed, set(sched.specs))
     plates = PlateRenderer()
-    clock_origin = datetime.now(timezone.utc)
+    generated_at = datetime.now(timezone.utc)
     cameras_meta = []
     for camera in range(1, args.cameras + 1):
         label = CAMERA_LABELS[camera - 1] if camera <= len(CAMERA_LABELS) else f"Synthetic camera {camera}"
@@ -451,15 +532,44 @@ def main(argv: list[str] | None = None) -> int:
             cameras_meta.append({"id": camera, "file": path.name, "codec": codec, "label": label})
             continue
         t0 = time.monotonic()
-        used = render_camera(camera, label, sched.by_camera[camera], args.seconds, args.seed, path, codec, args.ffmpeg, plates, clock_origin)
+        used = render_camera(camera, f"cam {camera} · {label.lower()}", sched.by_camera[camera], args.seconds, args.seed,
+                             path, codec, args.ffmpeg, plates)
         cameras_meta.append({"id": camera, "file": path.name, "codec": used, "label": label})
         print(f"cam_{camera}.mp4  {used}  {sched.count(camera):2d} appearances  {time.monotonic() - t0:5.1f} s")
 
+    own_meta = None
+    if own is not None:
+        own_apps = own.by_camera[OWN_GATE_EVAL_ID]
+        path = out_dir / OWN_GATE_FILE
+        if not args.only or OWN_GATE_EVAL_ID in args.only:
+            t0 = time.monotonic()
+            render_camera(OWN_GATE_EVAL_ID, OWN_GATE_HUD, own_apps, args.seconds, args.seed, path, "H264", args.ffmpeg, plates,
+                          palette=OWN_GATE_PALETTE, gate=True)
+            print(f"{OWN_GATE_FILE}  H264  {len(own_apps):2d} appearances  {time.monotonic() - t0:5.1f} s")
+        own_meta = {
+            "file": OWN_GATE_FILE, "codec": "H264", "label": OWN_GATE_LABEL, "eval_camera_id": OWN_GATE_EVAL_ID,
+            "mediamtx_path": "own_gate", "external_id": "OWN-GATE-01",
+            "shared_with_streams": [
+                {"plate": p, "display": format_plate(p), "start_s": s, "stream_cameras": sched.specs[p].cameras}
+                for p, _tl, s in OWN_GATE_SHARED
+            ],
+            "plates": [
+                {"plate": spec.plate, "display": format_plate(spec.plate), "two_line": spec.two_line, "shared": spec.anchor}
+                for spec in sorted(own.specs.values(), key=lambda s: (not s.anchor, s.plate))
+            ],
+            "appearances": [
+                {"plate": a.plate, "start_s": a.start_s, "end_s": a.end_s, "two_line": a.two_line, "direction": a.direction}
+                for a in sorted(own_apps, key=lambda a: a.start_s)
+            ],
+        }
+
     plates_json = {
-        "generated_at": clock_origin.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "seed": args.seed,
         "width": WIDTH, "height": HEIGHT, "fps": FPS, "loop_seconds": int(args.seconds),
+        "osd": "bottom-right strip '<camera> · loop mm:ss.d' (loop position, not a wall clock)",
         "cameras": cameras_meta,
+        "own_gate": own_meta,
         "plates": [
             {"plate": spec.plate, "display": format_plate(spec.plate), "two_line": spec.two_line,
              "anchor": spec.anchor, "cameras": spec.cameras}
@@ -477,6 +587,10 @@ def main(argv: list[str] | None = None) -> int:
     for camera in range(1, args.cameras + 1):
         apps = sorted(sched.by_camera[camera], key=lambda a: a.start_s)
         print(f"  {camera:<5} {len(apps):>11}  " + ", ".join(f"{a.plate}@{a.start_s:.0f}s" for a in apps))
+    if own is not None:
+        apps = sorted(own.by_camera[OWN_GATE_EVAL_ID], key=lambda a: a.start_s)
+        print(f"  own   {len(apps):>11}  " + ", ".join(f"{a.plate}@{a.start_s:.0f}s" for a in apps)
+              + f"   (shared with stream cameras: {', '.join(p for p, _tl, _s in OWN_GATE_SHARED)})")
     multi = sum(1 for s in sched.specs.values() if len(s.cameras) >= 3)
     unique = sum(1 for s in sched.specs.values() if len(s.cameras) == 1)
     print(f"\n{len(sched.specs)} plates ({multi} on >= 3 cameras, {unique} unique), "

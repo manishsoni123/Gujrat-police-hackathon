@@ -2,18 +2,37 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Card, Progress, Space, Table, Tag, Typography } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, ClusterOutlined, DatabaseOutlined, ExclamationCircleOutlined, QuestionCircleOutlined, ReloadOutlined, ThunderboltOutlined, VideoCameraOutlined } from '@ant-design/icons';
+import { Button, Card, Progress, Space, Table, Tooltip, Typography } from 'antd';
+import { CheckCircleOutlined, CloseCircleOutlined, ClusterOutlined, DatabaseOutlined, ExclamationCircleOutlined, PauseCircleOutlined, QuestionCircleOutlined, ReloadOutlined, ThunderboltOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
 import { KpiTile } from '@/components/KpiTile';
 import { camerasApi, healthApi } from '@/api';
-import type { Camera } from '@/api/types';
+import type { AnprWorker, Camera } from '@/api/types';
+import { rowProps } from '@/hooks/useListQuery';
+import { notStreaming, splitNotStreaming } from '@/utils/cameraState';
+import { CATALOGUE_NOT_STREAMING } from '@/theme/colours';
 import { useUiStore } from '@/store/ui';
 import { EmptyState, ErrorState, PageSkeleton } from '@/components/States';
-import { StatusTag, MaintenanceTag, DepartmentTag } from '@/components/Tags';
+import { ColourTag, StatusTag, MaintenanceTag, DepartmentTag } from '@/components/Tags';
 import { IstTime } from '@/components/IstTime';
 import { fmtBytes, fmtPct } from '@/utils/format';
 import { fmtIstDate, fmtMinutes } from '@/utils/time';
+
+/** Plate-detector badge from the worker heartbeat (CONTRACT §7.7): amber when the contour fallback is active. */
+function DetectorTag({ detector }: { detector: string | null | undefined }) {
+  if (!detector) return null;
+  if (detector === 'contour') {
+    return <ColourTag colour="#D97706" label="Contour fallback" size="small" title="Plate detector: bright-quadrilateral contour finder. Reads the synthetic plates on this CPU-only laptop but is a weak fallback on real footage; the ONNX detector (YOLO-v9-t) is the production path." />;
+  }
+  if (detector === 'onnx') return <ColourTag colour="#16A34A" label="ONNX detector" size="small" title="Plate detector: YOLO-v9-t ONNX model (open-image-models)" />;
+  if (detector === 'auto') return <ColourTag colour="#1E4DB7" label="ONNX + contour fallback" size="small" title="Plate detector: YOLO-v9-t ONNX first; the contour finder only on frames where ONNX returns no box" />;
+  return <ColourTag colour="#6B7280" label={detector} size="small" title="Plate detector reported by the worker" />;
+}
+
+function workerLabel(w: AnprWorker): string {
+  const kind = w.mode === 'live' ? 'Live ANPR worker' : 'Pre-index worker';
+  return `${kind} (${w.gpu ? 'GPU' : 'CPU'})`;
+}
 
 export function HealthPage() {
   const navigate = useNavigate();
@@ -22,19 +41,26 @@ export function HealthPage() {
   const cams = useQuery({ queryKey: ['cameras', 'uptime'], queryFn: () => camerasApi.list({ page_size: 200, sort: 'last_seen_at', order: 'desc' }), refetchInterval: 60_000 });
   const [uptimeFilter, setUptimeFilter] = useState<'all' | 'below90'>('all');
 
+  const camRows = useMemo(() => cams.data?.items ?? [], [cams.data]);
+  /** Ids of cameras the catalogue marks live=false: never pulled, so they are "not streaming", not down. */
+  const notStreamingIds = useMemo(() => new Set(notStreaming(camRows).map((c) => c.id)), [camRows]);
   const uptimeRows = useMemo(() => {
-    const rows = (cams.data?.items ?? []).filter((c) => c.status !== 'retired');
-    const filtered = uptimeFilter === 'below90' ? rows.filter((c) => (c.uptime_24h_pct ?? 0) < 90) : rows;
-    return filtered.sort((a, b) => (a.uptime_24h_pct ?? -1) - (b.uptime_24h_pct ?? -1));
-  }, [cams.data, uptimeFilter]);
+    const rows = camRows.filter((c) => c.status !== 'retired');
+    const filtered = uptimeFilter === 'below90' ? rows.filter((c) => !notStreamingIds.has(c.id) && (c.uptime_24h_pct ?? 0) < 90) : rows;
+    // Streaming cameras first (worst uptime on top); not-streaming catalogue cameras at the end.
+    return filtered.sort((a, b) => Number(notStreamingIds.has(a.id)) - Number(notStreamingIds.has(b.id)) || (a.uptime_24h_pct ?? -1) - (b.uptime_24h_pct ?? -1));
+  }, [camRows, uptimeFilter, notStreamingIds]);
 
   if (summary.isLoading && !summary.data) return <PageSkeleton cards={4} />;
   if (summary.isError && !summary.data) return <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />;
   const h = summary.data;
   if (!h) return null;
-  const cameras = live?.cameras ?? h.cameras;
+  const cameras = splitNotStreaming(live?.cameras ?? h.cameras, camRows) ?? { ...h.cameras, not_streaming: 0 };
   const uptime = live?.uptime_24h_pct ?? h.uptime_24h_pct;
   const diskTotal = h.disk.data_used_bytes + h.disk.data_free_bytes;
+  const down = h.down_over_5min.filter((d) => !notStreamingIds.has(d.id));
+  const downExcluded = h.down_over_5min.length - down.length;
+  const notStreamingRows = h.not_streaming ?? notStreaming(camRows).map((c) => ({ id: c.id, name: c.name, district: c.district, since: c.last_status_change_at }));
 
   return (
     <div>
@@ -51,13 +77,14 @@ export function HealthPage() {
           </Button>
         }
       />
-      <div className="sg-grid sg-grid-6" style={{ marginBottom: 12 }}>
+      <div className="sg-grid sg-grid-7" style={{ marginBottom: 12 }}>
         <KpiTile label="Cameras" value={cameras.total} icon={<VideoCameraOutlined />} colour="#1E4DB7" footer={`${h.anpr_live_cameras} with live ANPR`} onClick={() => navigate('/cameras')} />
         <KpiTile label="Online" value={cameras.online} icon={<CheckCircleOutlined />} colour="#16A34A" onClick={() => navigate('/cameras?status=online')} />
         <KpiTile label="Degraded" value={cameras.degraded} icon={<ExclamationCircleOutlined />} colour="#D97706" onClick={() => navigate('/cameras?status=degraded')} />
-        <KpiTile label="Offline" value={cameras.offline} icon={<CloseCircleOutlined />} colour="#DC2626" onClick={() => navigate('/cameras?status=offline')} />
+        <KpiTile label="Offline" value={cameras.offline} icon={<CloseCircleOutlined />} colour="#DC2626" hint="Should stream but failed three health checks in a row" onClick={() => navigate('/cameras?status=offline')} />
+        <KpiTile label="Not streaming" value={cameras.not_streaming} icon={<PauseCircleOutlined />} colour={CATALOGUE_NOT_STREAMING.colour} footer="catalogue live = false" hint={CATALOGUE_NOT_STREAMING.hint} onClick={() => navigate('/cameras?status=not_streaming')} />
         <KpiTile label="Unknown" value={cameras.unknown} icon={<QuestionCircleOutlined />} colour="#9CA3AF" hint="Never checked - typically cameras without a stream URL" onClick={() => navigate('/cameras?status=unknown')} />
-        <KpiTile label="Uptime 24 h" value={uptime === null ? '—' : fmtPct(uptime)} icon={<ThunderboltOutlined />} colour="#0EA5E9" footer="ready checks / all checks" />
+        <KpiTile label="Uptime 24 h" value={uptime === null ? '—' : fmtPct(uptime)} icon={<ThunderboltOutlined />} colour="#0EA5E9" footer="ready checks / all checks" hint="Includes the not-streaming catalogue cameras, which are checked but never ready; on the mock sandbox the figure is low by design." />
       </div>
 
       <div className="sg-grid sg-grid-3" style={{ marginBottom: 12 }}>
@@ -91,14 +118,16 @@ export function HealthPage() {
           {h.anpr_workers.length ? (
             <div style={{ display: 'grid', gap: 6 }}>
               {h.anpr_workers.map((w) => (
-                <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, border: '1px solid #E5E7EB', borderRadius: 6, padding: '6px 10px' }}>
+                <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12, border: '1px solid #E5E7EB', borderRadius: 6, padding: '6px 10px', flexWrap: 'wrap' }}>
                   <span>
-                    <strong>{w.id}</strong> · {w.mode} · {w.gpu ? 'GPU' : 'CPU'} · {w.cameras} cameras · {w.fps_total.toFixed(1)} fps
+                    <Tooltip title={`Worker id ${w.id}${w.version ? ` · version ${w.version}` : ''}`}>
+                      <strong>{workerLabel(w)}</strong>
+                    </Tooltip>{' '}
+                    · {w.cameras} camera{w.cameras === 1 ? '' : 's'} · {w.fps_total.toFixed(1)} fps
                   </span>
-                  <Space size={6}>
-                    <Tag color={w.stale ? 'red' : 'green'} style={{ margin: 0 }}>
-                      {w.stale ? 'stale' : 'alive'}
-                    </Tag>
+                  <Space size={6} wrap>
+                    <DetectorTag detector={w.detector} />
+                    <ColourTag colour={w.stale ? '#DC2626' : '#16A34A'} label={w.stale ? 'Not responding' : 'Running'} size="small" dot pulse={!w.stale} title={w.stale ? 'No heartbeat for more than 45 s' : 'Heartbeat received within the last 45 s'} />
                     <IstTime value={w.last_heartbeat_at} mode="relative" muted />
                   </Space>
                 </div>
@@ -110,15 +139,15 @@ export function HealthPage() {
         </Card>
       </div>
 
-      <div className="sg-grid sg-grid-3" style={{ marginBottom: 12 }}>
-        <Card size="small" title={`Down for more than 5 minutes (${h.down_over_5min.length})`} styles={{ body: { padding: 0 } }}>
-          {h.down_over_5min.length ? (
+      <div className="sg-grid sg-grid-4" style={{ marginBottom: 12 }}>
+        <Card size="small" title={`Down for more than 5 minutes (${down.length})`} extra={downExcluded ? <Tooltip title={CATALOGUE_NOT_STREAMING.hint}><span style={{ fontSize: 12, color: CATALOGUE_NOT_STREAMING.colour }}>{downExcluded} not streaming (catalogue) not listed</span></Tooltip> : null} styles={{ body: { padding: 0 } }}>
+          {down.length ? (
             <Table
               size="small"
               rowKey="id"
-              pagination={h.down_over_5min.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
-              dataSource={h.down_over_5min}
-              onRow={(r) => ({ onClick: () => navigate(`/cameras/${r.id}`), style: { cursor: 'pointer' } })}
+              pagination={down.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
+              dataSource={down}
+              onRow={(r) => rowProps(() => navigate(`/cameras/${r.id}`))}
               columns={[
                 { title: 'Camera', dataIndex: 'name', ellipsis: true, render: (v: string, r) => <span><strong>{v}</strong><div style={{ fontSize: 11, color: '#6B7280' }}>{r.department_name} · {r.district ?? '—'}</div></span> },
                 { title: 'Since', dataIndex: 'offline_since', width: 120, render: (v: string) => <IstTime value={v} /> },
@@ -136,7 +165,7 @@ export function HealthPage() {
               rowKey="id"
               pagination={h.amc_expiring_30d.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
               dataSource={h.amc_expiring_30d}
-              onRow={(r) => ({ onClick: () => navigate(`/cameras?open=${r.id}`), style: { cursor: 'pointer' } })}
+              onRow={(r) => rowProps(() => navigate(`/cameras?open=${r.id}`))}
               columns={[
                 { title: 'Camera', dataIndex: 'name', ellipsis: true, render: (v: string, r) => <span><strong>{v}</strong><div style={{ fontSize: 11, color: '#6B7280' }}>{r.amc_vendor ?? 'vendor not recorded'}</div></span> },
                 { title: 'Expiry', dataIndex: 'amc_expiry', width: 110, render: (v: string) => fmtIstDate(v) },
@@ -154,7 +183,7 @@ export function HealthPage() {
               rowKey="id"
               pagination={h.maintenance.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
               dataSource={h.maintenance}
-              onRow={(r) => ({ onClick: () => navigate(`/cameras?open=${r.id}`), style: { cursor: 'pointer' } })}
+              onRow={(r) => rowProps(() => navigate(`/cameras?open=${r.id}`))}
               columns={[
                 { title: 'Camera', dataIndex: 'name', ellipsis: true, render: (v: string) => <strong>{v}</strong> },
                 { title: 'Status', dataIndex: 'maintenance_status', width: 150, render: (v: string) => <MaintenanceTag status={v} size="small" /> },
@@ -163,6 +192,24 @@ export function HealthPage() {
             />
           ) : (
             <EmptyState compact title="No cameras flagged for maintenance" description="Maintenance status is set from the camera drawer." />
+          )}
+        </Card>
+        <Card size="small" title={<Tooltip title={CATALOGUE_NOT_STREAMING.hint}><span style={{ color: CATALOGUE_NOT_STREAMING.colour }}>Not streaming (catalogue) ({notStreamingRows.length})</span></Tooltip>} styles={{ body: { padding: 0 } }}>
+          {notStreamingRows.length ? (
+            <Table
+              size="small"
+              rowKey="id"
+              pagination={notStreamingRows.length > 8 ? { pageSize: 8, size: 'small', showSizeChanger: false } : false}
+              dataSource={notStreamingRows}
+              onRow={(r) => rowProps(() => navigate(`/cameras?open=${r.id}`))}
+              columns={[
+                { title: 'Camera', dataIndex: 'name', ellipsis: true, render: (v: string, r) => <span><strong>{v}</strong><div style={{ fontSize: 11, color: '#6B7280' }}>{r.district ?? '—'}</div></span> },
+                { title: 'Since', dataIndex: 'since', width: 120, render: (v: string | null) => <IstTime value={v} /> },
+                { title: '', width: 110, render: () => <StatusTag status="not_streaming" size="small" short /> },
+              ]}
+            />
+          ) : (
+            <EmptyState compact title="Every registered camera has delivered a stream" description="Cameras the catalogue marks live=false would be listed here, in grey, without raising offline alerts." />
           )}
         </Card>
       </div>
@@ -189,13 +236,25 @@ export function HealthPage() {
           loading={cams.isLoading}
           dataSource={uptimeRows}
           pagination={{ pageSize: 15, size: 'small', showSizeChanger: false, showTotal: (t) => `${t} cameras` }}
-          onRow={(r) => ({ onClick: () => navigate(`/cameras/${r.id}`) })}
+          onRow={(r) => rowProps(() => navigate(`/cameras/${r.id}`))}
           columns={[
             { title: 'Camera', dataIndex: 'name', ellipsis: true, render: (v: string) => <strong>{v}</strong> },
             { title: 'Department', dataIndex: 'department_code', width: 120, render: (v: string, r) => <DepartmentTag code={v} name={r.department_name} size="small" /> },
             { title: 'District', dataIndex: 'district', width: 140, render: (v: string | null) => v ?? '—' },
-            { title: 'Status', dataIndex: 'status', width: 110, render: (v: string) => <StatusTag status={v} size="small" /> },
-            { title: 'Uptime 24 h', dataIndex: 'uptime_24h_pct', width: 220, render: (v: number | null) => (v === null ? <span style={{ color: '#9CA3AF' }}>never checked</span> : <Progress percent={Math.round(v)} size="small" strokeColor={v >= 90 ? '#16A34A' : v >= 50 ? '#D97706' : '#DC2626'} format={(p) => `${p} %`} />) },
+            { title: 'Status', dataIndex: 'status', width: 170, render: (v: string, r) => <StatusTag status={v} live={r.live} size="small" /> },
+            {
+              title: 'Uptime 24 h',
+              dataIndex: 'uptime_24h_pct',
+              width: 220,
+              render: (v: number | null, r) =>
+                notStreamingIds.has(r.id) ? (
+                  <Tooltip title={CATALOGUE_NOT_STREAMING.hint}><span style={{ color: CATALOGUE_NOT_STREAMING.colour }}>not streaming (catalogue)</span></Tooltip>
+                ) : v === null ? (
+                  <span style={{ color: '#9CA3AF' }}>never checked</span>
+                ) : (
+                  <Progress percent={Math.round(v)} size="small" strokeColor={v >= 90 ? '#16A34A' : v >= 50 ? '#D97706' : '#DC2626'} format={(p) => `${p} %`} />
+                ),
+            },
             { title: 'Last seen', dataIndex: 'last_seen_at', width: 150, render: (v: string | null) => <IstTime value={v} /> },
             { title: 'Status since', dataIndex: 'last_status_change_at', width: 150, render: (v: string | null) => <IstTime value={v} /> },
           ]}

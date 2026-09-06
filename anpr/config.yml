@@ -20,12 +20,44 @@ preindex_skip_live: true      # pre-index worker skips cameras already covered l
 frame_width: 960              # scale=960:-2
 reconnect_min_s: 2
 reconnect_max_s: 30
+# real relay / organiser feeds (anpr/decode.py): no ffprobe before an RTSP dial (stream info comes from
+# ffmpeg's stderr), 30 s RTSP socket timeout, 90 s for the first frame, 60 s stall watchdog, one dial
+# at a time 3 s apart, 2 decoder threads per ffmpeg
+anpr_probe_timeout_s: 45
+anpr_rtsp_probe: false
+anpr_rtsp_timeout_s: 30
+anpr_start_timeout_s: 90
+anpr_stall_timeout_s: 60
+anpr_dial_spacing_s: 3
+anpr_decode_threads: 2
+api_timeout_s: 30
 
 # plate detection + OCR
 anpr_detector: auto           # auto | onnx | contour
 anpr_det_model: /app/weights/yolo-v9-t-384-license-plates-end2end.onnx
 anpr_det_conf: 0.4
 anpr_min_plate_w: 60
+anpr_det_tile: 0              # >0: also run the detector on overlapping tiles of this size (px) - needed for
+                              # wide-angle 1080p feeds where plates are 30-110 px (organiser sandbox); costs one
+                              # inference per tile (1920 px frame, 768 px tiles -> 6 tiles + whole frame)
+anpr_det_tile_overlap: 0.15
+anpr_static_box_window: 20    # boxes present in >= anpr_static_box_hits of the last N frames are burnt-in text / signboards, not plates (0 = off)
+anpr_static_box_hits: 0.8     # 0.5 on the organiser feeds (captions / signboards are boxed intermittently)
+anpr_osd_band: 0.08           # boxes centred in the top/bottom 8 % of the frame (burnt-in clocks, captions) are never plates (0 = off)
+anpr_osd_warmup_s: 30         # static-text regions (low temporal variance + strong edges) learnt from the first 30 s and refreshed every 30 s (0 = off)
+anpr_invalid_reads_per_min: 10  # invalid-format reads posted per camera per minute at most (valid plates are never capped; 0 = unlimited)
+anpr_ocr: paddle              # paddle | fast_plate | ensemble (anpr/ocr.py; measured on the organiser crop bank in docs/anpr-accuracy.md)
+anpr_ocr_fast_model: global_mobile_vit_v2_ocr   # fast-plate-ocr model stem in /app/weights (or cct_s_v2_global)
+anpr_ocr_paddle_mode: det     # det = det+rec on every crop (reads the organiser plates; rec-only on the padded crop misreads) | auto | rec
+anpr_ocr_ensemble_min_conf: 0.45
+anpr_ocr_min_w: 60            # OCR only crops at least this wide (decoded px); narrower boxes are still tracked as detected vehicles
+anpr_detect_width: 0          # detector input width (0 = decoded width); e.g. frame_width 0 (native 1920) + detect_width 1280 = native crops, 3-tile detection
+anpr_best_shot: true          # track plates across frames (anpr/tracks.py) and OCR the best crops of a track once it settles / ends
+anpr_track_gap_s: 2
+anpr_track_keep: 3
+anpr_track_stall: 3
+anpr_evidence_dir: ""         # e.g. /app/media/anpr_evidence - one crop + JSON line per detected vehicle (needs a writable mount)
+anpr_evidence_per_hour: 200
 anpr_vote_window_s: 3
 anpr_min_read_conf: 0.30
 sighting_close_s: 15

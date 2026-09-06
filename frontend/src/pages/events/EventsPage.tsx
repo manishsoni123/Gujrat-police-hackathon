@@ -5,7 +5,7 @@ import { Button, Card, Select, Space, Switch, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
-import { useListQuery } from '@/hooks/useListQuery';
+import { rowProps, useListQuery } from '@/hooks/useListQuery';
 import { eventsApi } from '@/api';
 import type { EventItem } from '@/api/types';
 import { EventTypeTag, DepartmentTag, StatusTag } from '@/components/Tags';
@@ -85,7 +85,7 @@ export function EventsPage() {
         ) : empty ? (
           <EmptyState title={hasFilters ? 'No events match these filters' : 'No events in the last 24 hours'} description={hasFilters ? 'Widen the window or clear a filter.' : 'Loop resets and watchlist hits are logged automatically; operators can tag accidents, suspicious activity and checkpoints from any camera or read.'} actions={canWrite && !hasFilters ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setFormOpen(true)}>Tag event</Button> : undefined} />
         ) : (
-          <Table<EventItem> className="sg-table" size="middle" rowKey="id" columns={columns} dataSource={list.items} loading={list.query.isLoading} pagination={list.pagination} onChange={list.onTableChange} sticky scroll={{ x: 1420 }} onRow={(e) => ({ onClick: () => navigate(`/cameras/${e.camera.id}`) })} />
+          <Table<EventItem> className="sg-table" size="middle" rowKey="id" columns={columns} dataSource={list.items} loading={list.query.isLoading} pagination={list.pagination} onChange={list.onTableChange} sticky scroll={{ x: 1420 }} onRow={(e) => rowProps(() => navigate(`/cameras/${e.camera.id}`))} />
         )}
       </Card>
       <EventForm open={formOpen} onClose={() => setFormOpen(false)} />

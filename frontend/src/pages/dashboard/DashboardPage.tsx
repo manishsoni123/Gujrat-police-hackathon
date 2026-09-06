@@ -8,6 +8,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   EyeOutlined,
+  PauseCircleOutlined,
   ExclamationCircleOutlined,
   FlagOutlined,
   ThunderboltOutlined,
@@ -25,8 +26,9 @@ import { hoursAgoIso } from '@/utils/time';
 import { PriorityTag, AlertStatusTag, ConfidenceLevelTag } from '@/components/Tags';
 import { PlateText } from '@/components/PlateText';
 import { IstTime } from '@/components/IstTime';
-import { BaseMap, CameraMarkers, FitBounds, type MapCamera } from '@/components/MapView';
-import { CHART_SERIES, OBJECT_CLASS_COLOURS } from '@/theme/colours';
+import { BaseMap, CameraMarkers, FitBounds, useAlertFlash, type MapCamera } from '@/components/MapView';
+import { CATALOGUE_NOT_STREAMING, CHART_SERIES, OBJECT_CLASS_COLOURS } from '@/theme/colours';
+import { splitNotStreaming } from '@/utils/cameraState';
 import type { DashboardCharts } from '@/api/types';
 
 function pivotByCamera(rows: { camera_name: string; label_ist: string; sightings?: number; alerts?: number }[], valueKey: 'sightings' | 'alerts') {
@@ -77,11 +79,14 @@ export function DashboardPage() {
     () =>
       (geo.data?.features ?? []).map((f) => {
         const [lon, lat] = f.geometry.coordinates as [number, number];
-        return { id: f.properties.id, name: f.properties.name, lat, lon, status: f.properties.status, department_code: f.properties.department_code, maintenance_status: f.properties.maintenance_status, anpr_enabled: f.properties.anpr_enabled };
+        return { id: f.properties.id, name: f.properties.name, lat, lon, status: f.properties.status, live: f.properties.live, department_code: f.properties.department_code, maintenance_status: f.properties.maintenance_status, anpr_enabled: f.properties.anpr_enabled };
       }),
     [geo.data],
   );
   const points = useMemo(() => cams.map((c) => [c.lat, c.lon] as [number, number]), [cams]);
+  const flash = useAlertFlash();
+  const mapStyle = useMemo(() => ({ flashId: flash.flashId, flashColour: flash.flashColour }), [flash.flashId, flash.flashColour]);
+  const geoRows = useMemo(() => (geo.data?.features ?? []).map((f) => ({ status: f.properties.status, live: f.properties.live })), [geo.data]);
 
   const perHour = useMemo(() => pivotByCamera(charts.data?.vehicles_per_hour ?? [], 'sightings'), [charts.data]);
   const alertsPer = useMemo(() => pivotByCamera(charts.data?.alerts_per_camera_day ?? [], 'alerts'), [charts.data]);
@@ -91,8 +96,10 @@ export function DashboardPage() {
   if (stats.isError && !stats.data) return <ErrorState error={stats.error} onRetry={() => void stats.refetch()} />;
 
   const s = stats.data;
-  const cameras = live?.cameras ?? s?.cameras;
+  // Cameras the catalogue marks live=false are "not streaming", not offline (grey, separate tile).
+  const cameras = splitNotStreaming(live?.cameras ?? s?.cameras, geoRows);
   const uptime = live?.uptime_24h_pct ?? health.data?.uptime_24h_pct ?? null;
+  const streaming = cameras ? cameras.total - cameras.not_streaming : null;
 
   return (
     <div>
@@ -103,17 +110,26 @@ export function DashboardPage() {
           <Segmented options={[{ label: 'Last 24 h', value: '24h' }, { label: 'Last 7 days', value: '7d' }]} value={range} onChange={(v) => setRange(v as '24h' | '7d')} />
         }
       />
-      <div className="sg-grid sg-grid-6" style={{ marginBottom: 12 }}>
+      <div className="sg-grid sg-grid-7" style={{ marginBottom: 12 }}>
         <KpiTile label="Cameras" value={cameras?.total} icon={<VideoCameraOutlined />} colour="#1E4DB7" footer={`${s?.cameras.anpr_live ?? 0} with live ANPR`} onClick={() => navigate('/cameras')} />
         <KpiTile label="Online" value={cameras?.online} icon={<CheckCircleOutlined />} colour="#16A34A" footer={`${cameras?.degraded ?? 0} degraded`} onClick={() => navigate('/cameras?status=online')} />
-        <KpiTile label="Offline" value={cameras?.offline} icon={<CloseCircleOutlined />} colour="#DC2626" footer={`${cameras?.unknown ?? 0} unknown`} onClick={() => navigate('/health')} />
+        <KpiTile label="Offline" value={cameras?.offline} icon={<CloseCircleOutlined />} colour="#DC2626" footer={`${cameras?.unknown ?? 0} unknown`} hint="Cameras that should stream but failed three health checks in a row." onClick={() => navigate('/health')} />
+        <KpiTile
+          label="Not streaming"
+          value={cameras?.not_streaming}
+          icon={<PauseCircleOutlined />}
+          colour={CATALOGUE_NOT_STREAMING.colour}
+          footer="catalogue live = false"
+          hint={CATALOGUE_NOT_STREAMING.hint}
+          onClick={() => navigate('/cameras?status=not_streaming')}
+        />
         <KpiTile
           label="Uptime 24 h"
           value={uptime === null ? (s?.cameras ? '—' : null) : fmtPct(uptime)}
           icon={<ThunderboltOutlined />}
           colour="#0EA5E9"
-          footer={cameras ? `${cameras.offline} of ${cameras.total} cameras offline` : 'share of ready health checks'}
-          hint="Ready health checks ÷ all checks over the last 24 h across every registered camera. Cameras the catalogue marks live=false count as offline, which is why the mock sandbox shows a low figure."
+          footer={cameras && streaming !== null ? `${cameras.offline} of ${streaming} streaming cameras offline` : 'share of ready health checks'}
+          hint="Ready health checks ÷ all checks over the last 24 h. Cameras the catalogue marks live=false are checked but never ready, so on the mock sandbox (42 of 60 not streaming) the figure is low by design."
           onClick={() => navigate('/health')}
         />
         <KpiTile label="Reads 24 h" value={s?.reads.last_24h} icon={<EyeOutlined />} colour="#7C3AED" footer={`${live ? `${live.reads_last_min} reads/min now · ` : ''}${s?.sightings.last_24h ?? 0} sightings · ${fmtPct(s?.sightings.valid_format_pct_24h ?? null, 0)} valid`} onClick={() => navigate('/detections')} />
@@ -240,7 +256,7 @@ export function DashboardPage() {
         </Card>
         <Card title="Estate map" size="small" styles={{ body: { padding: 8 } }} extra={<Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/map')}>Full map</Button>}>
           <BaseMap height={300} scrollWheelZoom={false}>
-            <CameraMarkers cameras={cams} cluster onClick={(c) => navigate(`/cameras/${c.id}`)} />
+            <CameraMarkers cameras={cams} cluster styleOpts={mapStyle} onClick={(c) => navigate(`/cameras/${c.id}`)} />
             {points.length ? <FitBounds points={points} /> : null}
           </BaseMap>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6B7280', padding: '8px 4px 0' }}>
@@ -254,7 +270,7 @@ export function DashboardPage() {
         </Card>
       </div>
       <Typography.Text type="secondary" style={{ display: 'block', marginTop: 10, fontSize: 12 }}>
-        Buckets are computed in IST. Reads = accepted (voted) plate reads; sightings = one vehicle passing one camera.
+        Buckets are computed in IST. Reads = confirmed plate reads (the best of several frames of the same plate); sightings = one vehicle passing one camera.
       </Typography.Text>
     </div>
   );

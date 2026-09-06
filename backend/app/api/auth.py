@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, DbDep, extract_token, remember_actor, user_from_token, user_scope
 from app.core.config import settings
 from app.core.errors import ApiError, conflict, not_found, unauthorized, validation_error
-from app.core.ratelimit import RateLimiter
+from app.core.ratelimit import USER_FAIL_LIMIT, USER_FAIL_WINDOW_S, RateLimiter
 from app.core.rbac import permissions_for
 from app.core.security import create_access_token, hash_password, password_policy_ok, verify_password
 from app.core.tz import iso_z, utcnow
@@ -19,7 +19,8 @@ from app.services.audit import client_ip, set_audit
 from app.services.media_auth import camera_allowed, token_from_uri
 
 router = APIRouter(tags=["auth"])
-_limiter = RateLimiter(settings.LOGIN_RATE_LIMIT_PER_MIN)
+_limiter = RateLimiter(settings.LOGIN_RATE_LIMIT_PER_MIN)  # per IP, every attempt
+_user_limiter = RateLimiter(USER_FAIL_LIMIT, USER_FAIL_WINDOW_S)  # per username, failed attempts only
 
 COOKIE = "sg_session"
 # Unknown usernames are verified against this hash so a login attempt costs the same bcrypt work
@@ -37,10 +38,13 @@ def _set_cookie(response: Response, token: str) -> None:
 @router.post("/auth/login")
 async def login(body: LoginRequest, request: Request, response: Response, db: DbDep):
     ip = client_ip(request) or "unknown"
-    if not _limiter.allow(ip):
-        set_audit(request, action="auth.login_failed", actor=body.username.lower(), after={"reason": "rate_limited"})
-        raise ApiError(429, "Too many login attempts; try again in a minute")
     username = body.username.strip().lower()
+    if not _limiter.allow(ip):
+        set_audit(request, action="auth.login_failed", actor=username, after={"reason": "rate_limited"})
+        raise ApiError(429, "Too many login attempts; try again in a minute")
+    if _user_limiter.blocked(username):
+        set_audit(request, action="auth.login_failed", actor=username, after={"reason": "rate_limited_user", "username": username})
+        raise ApiError(429, "Too many failed attempts for this account; try again in 15 minutes")
     user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
     if user is None or not user.is_active:
         verify_password(body.password, _DUMMY_HASH)
@@ -48,12 +52,13 @@ async def login(body: LoginRequest, request: Request, response: Response, db: Db
     else:
         ok = verify_password(body.password, user.password_hash)
     if not ok:
+        _user_limiter.record(username)
         set_audit(request, action="auth.login_failed", actor=username, after={"username": username})
         raise ApiError(401, "Invalid username or password")
     token, exp = create_access_token(user)
     user.last_login_at = utcnow()
     await db.commit()
-    _limiter.reset(ip)
+    _user_limiter.reset(username)  # only this account's failure counter; the per-IP window is never cleared
     await lookups.departments(db)
     remember_actor(request, user)
     set_audit(request, action="auth.login", entity="user", entity_id=user.id)
@@ -86,9 +91,13 @@ async def change_password(body: ChangePasswordRequest, user: CurrentUser, db: Db
         raise validation_error("Weak password", [{"field": "new_password", "message": "at least 10 characters with a letter and a digit"}])
     user.password_hash = hash_password(body.new_password)
     user.updated_at = utcnow()
+    # every token issued before this instant (including the one used for this call) is rejected from now on
+    user.token_not_before = user.updated_at
     await db.commit()
-    set_audit(request, action="user.change_password", entity="user", entity_id=user.id)
-    return Response(status_code=204)
+    set_audit(request, action="user.change_password", entity="user", entity_id=user.id, after={"sessions_invalidated": True})
+    resp = Response(status_code=204)
+    resp.delete_cookie(COOKIE, path="/")
+    return resp
 
 
 @router.get("/auth/verify", include_in_schema=False)

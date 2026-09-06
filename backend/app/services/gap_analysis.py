@@ -68,13 +68,13 @@ async def _compute(db: AsyncSession, scope: Scope, p: dict[str, Any], district: 
     for c in cams:
         dcode = lookups.dept_sync(c.department_id).code if lookups.dept_sync(c.department_id) else "UNASSIGNED"
         k = (c.district, c.police_station, c.ward)
-        a = by_area.setdefault(k, {"district": c.district, "police_station": c.police_station, "ward": c.ward, "total": 0, "online": 0, "degraded": 0, "offline": 0, "unknown": 0, "by_department": {}})
+        a = by_area.setdefault(k, {"district": c.district, "police_station": c.police_station, "ward": c.ward, "total": 0, "online": 0, "degraded": 0, "offline": 0, "not_streaming": 0, "unknown": 0, "by_department": {}})
         a["total"] += 1
-        a[c.status if c.status in ("online", "degraded", "offline", "unknown") else "unknown"] += 1
+        a[c.status if c.status in ("online", "degraded", "offline", "not_streaming", "unknown") else "unknown"] += 1
         a["by_department"][dcode] = a["by_department"].get(dcode, 0) + 1
-        d = by_district.setdefault(c.district or "Unknown", {"district": c.district or "Unknown", "total": 0, "online": 0, "degraded": 0, "offline": 0, "unknown": 0, "zero_coverage_cells": 0, "uncovered_pois": 0, "ageing": 0, "metadata_gaps": 0})
+        d = by_district.setdefault(c.district or "Unknown", {"district": c.district or "Unknown", "total": 0, "online": 0, "degraded": 0, "offline": 0, "not_streaming": 0, "unknown": 0, "zero_coverage_cells": 0, "uncovered_pois": 0, "ageing": 0, "metadata_gaps": 0})
         d["total"] += 1
-        d[c.status if c.status in ("online", "degraded", "offline", "unknown") else "unknown"] += 1
+        d[c.status if c.status in ("online", "degraded", "offline", "not_streaming", "unknown") else "unknown"] += 1
     for a in by_area.values():
         a["online_pct"] = round(100.0 * a["online"] / a["total"], 1) if a["total"] else 0.0
     area_list = sorted(by_area.values(), key=lambda x: (x["district"] or "", x["police_station"] or "", x["ward"] or ""))

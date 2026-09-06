@@ -3,9 +3,11 @@
 #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.debug.yml \
 #     --env-file deploy/.env --project-directory . up -d
 #
-# Publishes PostgreSQL on localhost:5432 (psql / DBeaver) and binds every
-# MediaMTX diagnostic port on all interfaces so a phone on the same Wi-Fi can
-# play rtsp://<laptop-ip>:8554/stream/1 directly.
+# Publishes PostgreSQL on localhost:5432 (psql / DBeaver) and binds the
+# MediaMTX RTSP/WHEP/HLS ports on all interfaces so a phone on the same Wi-Fi
+# can play rtsp://<laptop-ip>:8554/stream/1 directly. The control API (9997)
+# and playback server (9996) have no authentication of their own and stay on
+# loopback even here.
 #
 # The mediamtx `ports` list uses the compose `!override` tag: without it
 # compose UNIONS the lists, so the base file's "127.0.0.1:8554:8554" and this
@@ -27,5 +29,5 @@ services:
       - "8554:8554"
       - "8888:8888"
       - "8889:8889"
-      - "9996:9996"
-      - "9997:9997"
+      - "127.0.0.1:9996:9996"
+      - "127.0.0.1:9997:9997"

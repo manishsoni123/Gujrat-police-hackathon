@@ -6,7 +6,10 @@ module, main thread) + one HTTP sender thread (``client.Sender``) + one control 
 
 Per decoded frame (newest frame per camera only - older frames are dropped, never queued):
 
-    detector -> crops -> OCR -> normalise -> voter.add
+    detector (on the frame resized to ANPR_DETECT_WIDTH) -> OSD/static filters -> boxes in frame px
+    ANPR_BEST_SHOT=1: tracks.PlateTracker -> best crops per track -> OCR when the track settles/ends
+                      -> normalise -> voter.add; every ended track = a detected vehicle (evidence)
+    ANPR_BEST_SHOT=0: crops -> OCR -> normalise -> voter.add on every frame (pre-5-Sept behaviour)
     voter.expire   -> accepted reads -> sightings -> pending batch
     YOLOX every Nth frame -> tracker -> per-minute counts / intrusion events (live mode)
     snapshot every SNAPSHOT_INTERVAL_S (live mode)
@@ -40,11 +43,13 @@ import numpy as np
 from anpr import __version__
 from anpr.client import ApiClient, ApiError, FatalAuthError, Job, Sender, iso_utc
 from anpr.config import Settings, load_settings, redacted
-from anpr.decode import Decoder, Frame, encode_jpeg, jpeg_under, resize_width
-from anpr.detector import Box, build_detector, detector_status
+from anpr.decode import Decoder, DialGate, Frame, encode_jpeg, jpeg_under, resize_width
+from anpr.detector import Box, OsdMask, StaticBoxFilter, build_detector, detector_status
+from anpr.evidence import EvidenceStore
 from anpr.normalise import normalise
 from anpr.objects import ObjectCounter, YoloxDetector
 from anpr.sightings import Sighting, SightingTracker
+from anpr.tracks import PlateTracker, Track, crop_with_context, track_kind
 from anpr.voting import Candidate, VotedRead, Voter
 from anpr.weights.download import WeightStatus, verify_weight_file
 
@@ -53,6 +58,7 @@ log = logging.getLogger("anpr.pipeline")
 CROP_MAX_SIDE = 320
 CROP_MAX_BYTES = 200_000
 FRAME_MAX_BYTES = 400_000
+FRAME_JPEG_WIDTH = 960          # CONTRACT section 7.2: sighting frames are 960 px wide (frames may be decoded natively)
 SNAPSHOT_MAX_BYTES = 150_000
 MIN_OCR_CHARS = 6
 EDGE_MARGIN_PX = 2
@@ -140,6 +146,18 @@ class CameraWorker:
         self.last_snapshot_mono = 0.0
         self.last_flush_mono = time.monotonic()
         self.last_live_counts_mono = 0.0
+        self.static_boxes = StaticBoxFilter(window=settings.static_box_window, min_hits=settings.static_box_hits)
+        self.osd = OsdMask(band=settings.osd_band, warmup_s=settings.osd_warmup_s)
+        self.tracker = PlateTracker(cfg.id, gap_s=settings.track_gap_s, keep=settings.track_keep, stall_updates=settings.track_stall)
+        self.vehicles = 0                 # ended plate tracks = detected vehicles (evidence, whether or not read)
+        self.vehicles_ocr = 0             # tracks wide enough for at least one OCR pass
+        self.vehicles_read = 0            # tracks whose OCR produced a valid-format plate
+        self.text_tracks = 0              # ended tracks whose OCR only ever returned letters (caption / signboard) - not vehicles
+        self.evidence_files = 0
+        self.ocr_calls = 0
+        self.no_digit_reads = 0           # OCR strings without a digit (signboards / captions), dropped before voting
+        self.invalid_minute: tuple[int, int] = (0, 0)      # (minute bucket, invalid-format reads posted in it)
+        self.invalid_suppressed = 0
         self.counter: ObjectCounter | None = None
         if pipeline.objects is not None:
             self.counter = ObjectCounter(cfg.id)
@@ -150,7 +168,34 @@ class CameraWorker:
             on_frame=self._on_frame, on_discontinuity=self._on_discontinuity,
             reconnect_min_s=settings.reconnect_min_s, reconnect_max_s=settings.reconnect_max_s,
             file_realtime=settings.file_realtime, file_loop=settings.file_loop,
+            stall_timeout_s=settings.stall_timeout_s, start_timeout_s=settings.start_timeout_s,
+            probe_timeout_s=settings.probe_timeout_s, rtsp_probe=settings.rtsp_probe,
+            rtsp_timeout_s=settings.rtsp_timeout_s, decode_threads=settings.decode_threads,
+            dial_gate=pipeline.dial_gate,
         )
+
+    def suppression(self) -> dict[str, int]:
+        """Boxes / reads this camera dropped as overlay or noise (heartbeat ``extra.suppression``)."""
+        return {
+            "static": int(self.static_boxes.suppressed),
+            "osd_band": int(self.osd.suppressed_band),
+            "osd_region": int(self.osd.suppressed_region),
+            "osd_regions_now": len(self.osd.regions),
+            "invalid_capped": int(self.invalid_suppressed),
+            "no_digit": int(self.no_digit_reads),
+        }
+
+    def vehicle_stats(self) -> dict[str, int]:
+        """Detected-vehicle counters (heartbeat ``extra.vehicles``): tracks ended, OCR'd, read, evidence files."""
+        return {
+            "detected": int(self.vehicles),
+            "ocr": int(self.vehicles_ocr),
+            "read": int(self.vehicles_read),
+            "text": int(self.text_tracks),
+            "open_tracks": int(self.tracker.open),
+            "evidence_files": int(self.evidence_files),
+            "ocr_calls": int(self.ocr_calls),
+        }
 
     # ---- decoder thread side ---------------------------------------------
     def _on_frame(self, frame: Frame) -> None:
@@ -206,15 +251,24 @@ class Pipeline:
         self.settings = settings
         self.started_at = datetime.now(timezone.utc)
         self.stop_event = threading.Event()
-        self.client = ApiClient(settings.api_url, settings.internal_api_key, dry_run=settings.api_dry_run)
+        self.client = ApiClient(settings.api_url, settings.internal_api_key, dry_run=settings.api_dry_run,
+                                timeout_s=settings.api_timeout_s)
         self.sender = Sender(settings.reconnect_min_s, settings.reconnect_max_s)
+        # One RTSP dial at a time, ANPR_DIAL_SPACING_S apart (start-up and reconnects): the organiser
+        # server refuses bursts of concurrent dials and answers a DESCRIBE in 4-38 s.
+        self.dial_gate = DialGate(spacing_s=settings.dial_spacing_s)
         self.detector = build_detector(
             settings.detector, settings.det_model, conf=settings.det_conf, min_w=settings.min_plate_w,
-            cpu=settings.cpu, threads=settings.ocr_threads,
+            cpu=settings.cpu, threads=settings.ocr_threads, tile=settings.det_tile, tile_overlap=settings.det_tile_overlap,
         )
-        from anpr.ocr import PlateOCR
+        from anpr.ocr import build_ocr
 
-        self.ocr = PlateOCR(lang=settings.ocr_lang, cpu=settings.cpu, threads=settings.ocr_threads)
+        self.ocr = build_ocr(
+            settings.ocr_backend, weights_dir=os.path.dirname(settings.det_model) or "/app/weights", lang=settings.ocr_lang,
+            cpu=settings.cpu, threads=settings.ocr_threads, fast_model=settings.ocr_fast_model,
+            paddle_mode=settings.ocr_paddle_mode, ensemble_min_conf=settings.ocr_ensemble_min_conf,
+        )
+        self.evidence = EvidenceStore(settings.evidence_dir or None, settings.evidence_per_hour)
         self.objects: YoloxDetector | None = None
         self.object_weights: WeightStatus | None = None
         if settings.object_detect and settings.mode == "live":
@@ -341,6 +395,12 @@ class Pipeline:
             "extra": {
                 "detector": detector_status(self.detector, self.settings.detector),
                 "object_weights": None if self.object_weights is None else self.object_weights.state,
+                "suppression": {str(cid): cam.suppression() for cid, cam in self.cameras.items()},
+                "dials": self.dial_gate.dials,
+                "ocr": {"backend": self.ocr.name, "requested": self.settings.ocr_backend, "min_w": self.settings.ocr_min_w,
+                        "best_shot": bool(self.settings.best_shot), "detect_width": self.settings.detect_width},
+                "vehicles": {str(cid): cam.vehicle_stats() for cid, cam in self.cameras.items()},
+                "evidence": self.evidence.stats(),
             },
         }
 
@@ -349,14 +409,6 @@ class Pipeline:
         self.sender.submit_latest("heartbeat", Job("heartbeat", None, lambda: self.client.post_heartbeat(body)))
 
     # ---- frame processing ----------------------------------------------------
-    @staticmethod
-    def _crop(image: np.ndarray, box: Box) -> np.ndarray:
-        h, w = image.shape[:2]
-        mx, my = int(box.w * 0.08), int(box.h * 0.15)
-        x1, y1 = max(0, box.x - mx), max(0, box.y - my)
-        x2, y2 = min(w, box.x + box.w + mx), min(h, box.y + box.h + my)
-        return image[y1:y2, x1:x2]
-
     @staticmethod
     def _crop_jpeg(crop: np.ndarray) -> bytes:
         h, w = crop.shape[:2]
@@ -368,39 +420,153 @@ class Pipeline:
             crop = cv2.resize(crop, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
         return jpeg_under(crop, CROP_MAX_BYTES, quality=85)
 
-    def process_frame(self, cam: CameraWorker, frame: Frame) -> None:
+    def _detect(self, cam: CameraWorker, frame: Frame) -> list[Box]:
+        """Detector + OSD/static/edge filters; boxes are returned in decoded-frame pixels.
+
+        With ``ANPR_DETECT_WIDTH`` below the decoded width the detector (and the OSD learner) sees a
+        downscaled copy - the tiled ONNX cost stays that of the smaller image - while crops are
+        taken from the native frame.
+        """
+        image = frame.image
+        frame_h, frame_w = image.shape[:2]
+        det_img, sx, sy = image, 1.0, 1.0
+        dw = int(self.settings.detect_width)
+        if dw > 0 and frame_w > dw:
+            import cv2
+
+            dh = max(2, int(round(frame_h * dw / frame_w)) // 2 * 2)
+            det_img = cv2.resize(image, (dw, dh), interpolation=cv2.INTER_AREA)
+            sx, sy = frame_w / dw, frame_h / dh
         t0 = time.perf_counter()
-        boxes = self.detector.detect(frame.image)
-        t1 = time.perf_counter()
-        self.timing["detect_ms"] += (t1 - t0) * 1000
-        frame_w = frame.image.shape[1]
+        boxes = self.detector.detect(det_img)
+        self.timing["detect_ms"] += (time.perf_counter() - t0) * 1000
+        det_h, det_w = det_img.shape[:2]
         # A box touching the left/right frame edge is a plate still entering or leaving the
         # picture: its text is cut off and would only feed partial strings into the voter.
-        boxes = [b for b in boxes if b.x > EDGE_MARGIN_PX and b.x + b.w < frame_w - EDGE_MARGIN_PX]
-        boxes = sorted(boxes, key=lambda b: (-b.confidence, -b.area))[: self.settings.max_boxes_per_frame]
+        boxes = [b for b in boxes if b.x > EDGE_MARGIN_PX and b.x + b.w < det_w - EDGE_MARGIN_PX]
+        # Burnt-in clocks / captions live in the top/bottom bands and in static high-contrast regions
+        # (learnt from the first 30 s of the feed); a box there is never a plate.
+        cam.osd.observe(det_img, time.monotonic())
+        boxes = cam.osd.filter(boxes, det_h)
+        # Anything else that sits at the same place in every frame (signboards, parked vehicles).
+        boxes = cam.static_boxes.filter(boxes)
+        if sx != 1.0 or sy != 1.0:
+            boxes = [Box(int(round(b.x * sx)), int(round(b.y * sy)), max(1, int(round(b.w * sx))), max(1, int(round(b.h * sy))),
+                         b.confidence, b.source) for b in boxes]
+        return sorted(boxes, key=lambda b: (-b.confidence, -b.area))[: self.settings.max_boxes_per_frame]
+
+    def _ocr_crop(self, cam: CameraWorker, crop: np.ndarray, box: Box, captured_at: datetime, stream_pts: float,
+                  frame_index: int, frame: np.ndarray | None, track: Track | None = None) -> str | None:
+        """OCR one crop into the voter; returns the normalised plate (None when nothing usable came back)."""
+        t2 = time.perf_counter()
+        result = self.ocr.read(crop)
+        self.timing["ocr_ms"] += (time.perf_counter() - t2) * 1000
+        self.timing["ocr_calls"] += 1
+        cam.ocr_calls += 1
+        if not result.raw:
+            return None
+        norm = normalise(result.raw)
+        if len(norm.plate_norm) < MIN_OCR_CHARS:
+            log.debug("camera %s: ignored short OCR %r", cam.cfg.id, result.raw)
+            return None
+        if not any(ch.isdigit() for ch in norm.plate_norm):
+            # Every Indian registration carries digits; letters-only text is a signboard or a burnt-in
+            # caption ("GUJARAT POLICE", "Bhavani") the detector boxed - never a plate, never voted.
+            log.debug("camera %s: ignored letters-only OCR %r", cam.cfg.id, result.raw)
+            cam.no_digit_reads += 1
+            if track is not None:
+                track.text_only += 1
+            return None
+        conf = float(result.confidence) * (1.0 if box.source == "contour" else min(1.0, 0.5 + box.confidence / 2))
+        cand = Candidate(
+            camera_id=cam.cfg.id, captured_at=captured_at, stream_pts=stream_pts, frame_index=frame_index,
+            plate_raw=result.raw.replace("\n", " "), plate_norm=norm.plate_norm, is_valid_format=norm.is_valid_format,
+            confidence=conf, bbox=(box.x, box.y, box.w, box.h), crop_jpeg=self._crop_jpeg(crop), frame=frame,
+        )
+        self.voter.add(cand)
+        log.debug("camera %s: ocr %r -> %s (%.2f, %s, %s, w=%d)", cam.cfg.id, result.raw, norm.plate_norm, conf, box.source,
+                  result.backend, box.w)
+        return norm.plate_norm
+
+    def _ocr_track(self, cam: CameraWorker, t: Track, frame: Frame | None) -> None:
+        """OCR the best shots of a track (largest, sharpness-weighted); their reads are voted like frames.
+
+        ``frame`` is the full frame the best shot's sighting is illustrated with; ``None`` when the
+        track is flushed without a current frame (discontinuity / shutdown) - a crop must never be
+        posted as a sighting frame.
+        """
+        if t.ocr_runs == 0:
+            cam.vehicles_ocr += 1
+        t.ocr_runs += 1
+        t.ocr_width = t.best_width
+        for i, shot in enumerate(t.shots):
+            plate = self._ocr_crop(cam, shot.crop, shot.box, shot.captured_at, shot.stream_pts, shot.frame_index,
+                                   frame.image if (i == 0 and frame is not None) else None, track=t)
+            if plate:
+                t.reads.append(plate)
+
+    def _finish_track(self, cam: CameraWorker, t: Track, frame: Frame | None) -> None:
+        """A plate track ended: last OCR chance, then record the detected vehicle (evidence).
+
+        A track whose OCR only ever returned letters (``tracks.track_kind`` = ``text``: a signboard or
+        burnt-in caption the detector boxed) is logged and counted separately - it is not a vehicle
+        and gets no evidence file, so the detected-vehicle counts stay honest.
+        """
+        if cam.tracker.ready_for_ocr(t, self.settings.ocr_min_w, ended=True):
+            self._ocr_track(cam, t, frame)
+        best = t.best
+        if best is None:
+            return
+        kind = track_kind(t)
+        if kind == "text":
+            cam.text_tracks += 1
+            log.info("camera %s: static text t%d w=%dpx frames=%d %s..%s (letters-only OCR x%d, not a vehicle)", cam.cfg.id,
+                     t.id, best.box.w, t.frames, iso_utc(t.first_seen)[11:23], iso_utc(t.last_seen)[11:23], t.text_only)
+            return
+        cam.vehicles += 1
+        plates = [p for p in t.reads if p]
+        valid = [p for p in plates if normalise(p).is_valid_format]
+        if valid:
+            cam.vehicles_read += 1
+        record = {
+            "camera_id": cam.cfg.id, "camera_external_id": cam.cfg.external_id, "track": t.id,
+            "first_seen": iso_utc(t.first_seen), "last_seen": iso_utc(t.last_seen), "best_at": iso_utc(best.captured_at),
+            "stream_pts": round(float(best.stream_pts), 3), "bbox": best.box.as_list(), "width_px": int(best.box.w),
+            "height_px": int(best.box.h), "frames": int(t.frames), "det_conf": round(float(best.box.confidence), 3),
+            "sharpness": round(float(best.sharp), 1), "ocr_runs": int(t.ocr_runs), "ocr_min_w": int(self.settings.ocr_min_w),
+            "plate_norm": (valid or plates or [""])[-1], "is_valid_format": bool(valid), "kind": kind,
+        }
+        rel = self.evidence.write(cam.cfg.id, best.crop, record, best.captured_at)
+        if rel:
+            cam.evidence_files += 1
+        log.info("camera %s: vehicle t%d w=%dpx frames=%d %s..%s plate=%s%s", cam.cfg.id, t.id, best.box.w, t.frames,
+                 iso_utc(t.first_seen)[11:23], iso_utc(t.last_seen)[11:23], record["plate_norm"] or "-",
+                 f" evidence={rel}" if rel else "")
+
+    def _track_boxes(self, cam: CameraWorker, frame: Frame, boxes: list[Box]) -> None:
+        touched, ended = cam.tracker.update(boxes, frame.image, frame.captured_at, frame.stream_pts, frame.frame_index)
+        for t in touched:
+            if cam.tracker.ready_for_ocr(t, self.settings.ocr_min_w):
+                self._ocr_track(cam, t, frame)
+        for t in ended:
+            self._finish_track(cam, t, frame)
+
+    def _ocr_boxes(self, cam: CameraWorker, frame: Frame, boxes: list[Box]) -> None:
+        """Per-frame OCR (``ANPR_BEST_SHOT=0``): every box at least ``ANPR_OCR_MIN_W`` wide is read."""
         for box in boxes:
-            crop = self._crop(frame.image, box)
+            if box.w < self.settings.ocr_min_w:
+                continue
+            crop = crop_with_context(frame.image, box)
             if crop.size == 0:
                 continue
-            t2 = time.perf_counter()
-            result = self.ocr.read(crop)
-            self.timing["ocr_ms"] += (time.perf_counter() - t2) * 1000
-            self.timing["ocr_calls"] += 1
-            if not result.raw:
-                continue
-            norm = normalise(result.raw)
-            if len(norm.plate_norm) < MIN_OCR_CHARS:
-                log.debug("camera %s: ignored short OCR %r", cam.cfg.id, result.raw)
-                continue
-            conf = float(result.confidence) * (1.0 if box.source == "contour" else min(1.0, 0.5 + box.confidence / 2))
-            cand = Candidate(
-                camera_id=cam.cfg.id, captured_at=frame.captured_at, stream_pts=frame.stream_pts,
-                frame_index=frame.frame_index, plate_raw=result.raw.replace("\n", " "),
-                plate_norm=norm.plate_norm, is_valid_format=norm.is_valid_format, confidence=conf,
-                bbox=(box.x, box.y, box.w, box.h), crop_jpeg=self._crop_jpeg(crop), frame=frame.image,
-            )
-            self.voter.add(cand)
-            log.debug("camera %s: ocr %r -> %s (%.2f, %s)", cam.cfg.id, result.raw, norm.plate_norm, conf, box.source)
+            self._ocr_crop(cam, crop, box, frame.captured_at, frame.stream_pts, frame.frame_index, frame.image)
+
+    def process_frame(self, cam: CameraWorker, frame: Frame) -> None:
+        boxes = self._detect(cam, frame)
+        if self.settings.best_shot:
+            self._track_boxes(cam, frame, boxes)
+        else:
+            self._ocr_boxes(cam, frame, boxes)
 
         if self.objects is not None and cam.counter is not None:
             if cam.frames_processed % max(1, self.settings.object_every_n) == 0:
@@ -434,19 +600,47 @@ class Pipeline:
             if read.confidence < self.settings.min_read_conf:
                 log.debug("camera %s: %s below ANPR_MIN_READ_CONF (%.2f)", cam.cfg.id, read.plate_norm, read.confidence)
                 continue
+            if not read.is_valid_format and self._invalid_capped(cam):
+                log.debug("camera %s: invalid-format read %s dropped (ANPR_INVALID_READS_PER_MIN=%d reached)",
+                          cam.cfg.id, read.plate_norm, self.settings.invalid_reads_per_min)
+                continue
             crop_field = f"crop_{len(cam.pending.reads)}"
             s = self.sightings.add_read(read, crop_field, None)
             if s.best_changed and s.best_frame_jpeg is None and read.frame is not None and s.best_read_captured_at == read.captured_at:
-                s.best_frame_jpeg = jpeg_under(read.frame, FRAME_MAX_BYTES, quality=80)
+                frame_img = read.frame if read.frame.shape[1] <= FRAME_JPEG_WIDTH else resize_width(read.frame, FRAME_JPEG_WIDTH)
+                s.best_frame_jpeg = jpeg_under(frame_img, FRAME_MAX_BYTES, quality=80)
             read.frame = None
             cam.pending.reads.append(read)
             cam.reads += 1
             log.info("camera %s: read %s conf=%.2f votes=%d valid=%s sighting=%s", cam.cfg.id, read.plate_norm,
                      read.confidence, read.votes, read.is_valid_format, s.key)
 
+    def _invalid_capped(self, cam: CameraWorker) -> bool:
+        """True when this camera already posted ``ANPR_INVALID_READS_PER_MIN`` invalid-format reads this minute.
+
+        Invalid-format reads (OSD fragments, signboard text, half plates) never raise alerts, but
+        hundreds per minute from one camera drown the reads list and the dashboard counters; the
+        first N per minute are kept as evidence of what the OCR saw, the rest are counted and dropped.
+        Valid plates are never capped.
+        """
+        cap = int(self.settings.invalid_reads_per_min)
+        if cap <= 0:
+            return False
+        minute = int(time.monotonic() // 60)
+        bucket, count = cam.invalid_minute
+        if bucket != minute:
+            bucket, count = minute, 0
+        if count >= cap:
+            cam.invalid_minute = (bucket, count)
+            cam.invalid_suppressed += 1
+            return True
+        cam.invalid_minute = (bucket, count + 1)
+        return False
+
     def _handle_discontinuity(self, cam: CameraWorker, reason: str, before: float | None, after: float | None) -> None:
         cid = cam.cfg.id
         log.info("camera %s: discontinuity - %s", cid, reason)
+        self._flush_tracks(cam)
         self._accept_reads(cam, self.voter.flush(cid))
         self.sightings.close_all(cid)
         if cam.counter is not None:
@@ -526,9 +720,17 @@ class Pipeline:
         log.debug("camera %s: batch queued (%d reads, %d sightings, %d counts, %d events)", cid,
                   len(payload["reads"]), len(payload["sightings"]), len(payload["object_counts"]), len(payload["events"]))
 
+    def _flush_tracks(self, cam: CameraWorker) -> None:
+        """End every open plate track of a camera (discontinuity, stop): final OCR + vehicle evidence."""
+        for t in cam.tracker.flush():
+            if t.best is None:
+                continue
+            self._finish_track(cam, t, None)      # no current frame: the read carries no sighting frame
+
     def _finish_camera(self, cam: CameraWorker, note: str) -> None:
         """Flush everything a camera still holds (stop / shutdown)."""
         cid = cam.cfg.id
+        self._flush_tracks(cam)
         self._accept_reads(cam, self.voter.flush(cid))
         self.sightings.close_all(cid)
         if cam.counter is not None:
@@ -544,21 +746,24 @@ class Pipeline:
         elapsed = max(1e-6, time.monotonic() - self._loop_started)
         per_cam = {
             cid: {"state": c.decoder.state, "fps": round(c.decoder.stats.fps_actual, 2), "processed": c.frames_processed,
-                  "dropped": c.dropped, "reads": c.reads, "restarts": c.decoder.stats.restarts}
+                  "dropped": c.dropped, "reads": c.reads, "restarts": c.decoder.stats.restarts,
+                  "suppressed": c.suppression(), "vehicles": c.vehicle_stats()}
             for cid, c in self.cameras.items()
         }
-        log.info("stats: frames=%d (%.2f/s) detect=%.1f ms/frame ocr=%.1f ms/call (%d) objects=%.1f ms/call (%d) "
-                 "open_buckets=%d open_sightings=%d sender=%s cameras=%s",
-                 t["frames"], t["frames"] / elapsed, t["detect_ms"] / frames,
+        log.info("stats: frames=%d (%.2f/s) detect=%.1f ms/frame ocr=%s %.1f ms/call (%d) objects=%.1f ms/call (%d) "
+                 "open_buckets=%d open_sightings=%d evidence=%s sender=%s cameras=%s",
+                 t["frames"], t["frames"] / elapsed, t["detect_ms"] / frames, self.ocr.name,
                  t["ocr_ms"] / max(1, t["ocr_calls"]), t["ocr_calls"],
                  t["objects_ms"] / max(1, t["object_calls"]), t["object_calls"],
-                 self.voter.open_buckets(), self.sightings.open_count(), self.sender.stats, json.dumps(per_cam))
+                 self.voter.open_buckets(), self.sightings.open_count(), json.dumps(self.evidence.stats()),
+                 self.sender.stats, json.dumps(per_cam))
 
     # ---- main loop -----------------------------------------------------------
     def run(self) -> int:
         s = self.settings
-        log.info("starting worker %s mode=%s detector=%s objects=%s cpu=%s dry_run=%s", s.worker_id, s.mode,
-                 self.detector.name, self.objects is not None, s.cpu, s.api_dry_run)
+        log.info("starting worker %s mode=%s detector=%s ocr=%s best_shot=%s ocr_min_w=%d detect_width=%d objects=%s cpu=%s dry_run=%s",
+                 s.worker_id, s.mode, self.detector.name, self.ocr.name, s.best_shot, s.ocr_min_w, s.detect_width,
+                 self.objects is not None, s.cpu, s.api_dry_run)
         status = detector_status(self.detector, s.detector)
         if status["degraded"]:
             log.error("worker %s runs DEGRADED: ANPR_DETECTOR=%s requested but the active detector is %s "

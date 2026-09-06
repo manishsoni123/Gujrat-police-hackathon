@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings as env
 from app.core.errors import validation_error
+from app.core.urlguard import check_outbound_url
 from app.core.tz import utcnow
 from app.db.models import Setting
 
@@ -54,7 +55,7 @@ def _v_url(v: Any) -> str:
     s = str(v or "").strip().rstrip("/")
     if not s.lower().startswith(("http://", "https://")):
         raise ValueError("must be an http(s) URL")
-    return s
+    return check_outbound_url(s).rstrip("/")  # SSRF guard (core/urlguard.py)
 
 
 def _v_enum(*allowed: str) -> Callable[[Any], str]:
@@ -113,6 +114,21 @@ def _v_aliases(v: Any) -> dict[str, str]:
     return {str(k).strip().lower(): str(val).strip().upper() for k, val in v.items()}
 
 
+def _v_host(v: Any) -> str:
+    """Bare host or IP for the sandbox relay (no scheme, no credentials, no path)."""
+    s = str(v or "").strip()
+    if not s or "/" in s or "@" in s or " " in s or ":" in s:
+        raise ValueError("must be a bare host name or IP address (no scheme, port, path or credentials)")
+    return s
+
+
+def _v_path(v: Any) -> str:
+    s = str(v or "").strip()
+    if s and ("\x00" in s or ".." in s.replace("\\", "/").split("/")):
+        raise ValueError("must be an absolute file path inside the container without '..'")
+    return s
+
+
 def _v_map_center(v: Any) -> list[float]:
     if isinstance(v, str):
         v = json.loads(v)
@@ -141,6 +157,23 @@ REGISTRY: dict[str, SettingDef] = {
         SettingDef("catalogue.timeout_s", lambda: env.SANDBOX_TIMEOUT_S, _v_num(1, 600)),
         SettingDef("catalogue.field_map", lambda: DEFAULT_FIELD_MAP, _v_field_map),
         SettingDef("catalogue.department_aliases", lambda: DEFAULT_DEPT_ALIASES, _v_aliases),
+        # Organiser ("Sentinel") sandbox — CONTRACT Amendments 2026-09-05. `catalogue.source` selects the adapter:
+        # mock (built-in /api/ingest), generic_json (any /api/ingest host, field map) or sentinel_portal
+        # (cameras.json + enrichment CSV + stream credentials). Public so the UI can drop the MOCK badge.
+        SettingDef("catalogue.source", lambda: env.catalogue_source_default, _v_enum("mock", "sentinel_portal", "generic_json"), public=True),
+        SettingDef("catalogue.portal_url", lambda: env.SANDBOX_PORTAL_URL, _v_url),
+        SettingDef("catalogue.portal_email", lambda: env.SANDBOX_PORTAL_EMAIL or env.SANDBOX_STREAM_EMAIL, _v_str),
+        SettingDef("catalogue.portal_password", lambda: env.SANDBOX_PORTAL_PASSWORD, _v_str, is_secret=True),
+        SettingDef("catalogue.enrichment_path", lambda: env.CATALOGUE_ENRICHMENT_PATH, _v_path),
+        SettingDef("catalogue.cameras_json_path", lambda: env.CATALOGUE_CAMERAS_JSON_PATH, _v_path),
+        SettingDef("sandbox.stream_host", lambda: env.SANDBOX_STREAM_HOST, _v_host),
+        SettingDef("sandbox.rtsp_port", lambda: env.SANDBOX_RTSP_PORT, _v_num(1, 65535, True)),
+        SettingDef("sandbox.whep_port", lambda: env.SANDBOX_WHEP_PORT, _v_num(1, 65535, True)),
+        SettingDef("sandbox.hls_base", lambda: env.SANDBOX_HLS_BASE, _v_url),
+        SettingDef("sandbox.stream_email", lambda: env.SANDBOX_STREAM_EMAIL, _v_str),
+        SettingDef("sandbox.stream_password", lambda: env.SANDBOX_STREAM_PASSWORD, _v_str, is_secret=True),
+        SettingDef("sandbox.probe_timeout_s", lambda: env.SANDBOX_PROBE_TIMEOUT_S, _v_num(3, 60, True)),
+        SettingDef("sandbox.probe_parallel", lambda: env.SANDBOX_PROBE_PARALLEL, _v_num(1, 6, True)),
         SettingDef("retention.days_frames", lambda: env.RETENTION_DAYS_FRAMES, _v_num(1, 3650, True)),
         SettingDef("retention.days_reads", lambda: env.RETENTION_DAYS_READS, _v_num(1, 3650, True)),
         SettingDef("retention.days_clips", lambda: env.RETENTION_DAYS_CLIPS, _v_num(1, 3650, True)),

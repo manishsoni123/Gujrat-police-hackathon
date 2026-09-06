@@ -82,6 +82,8 @@ async def update_user(user_id: int, body: UserUpdate, db: DbDep, request: Reques
     for k, v in data.items():
         setattr(u, k, v)
     u.updated_at = utcnow()
+    if data.get("is_active") is False or "role" in data or "department_id" in data or "district" in data:
+        u.token_not_before = u.updated_at  # role/scope changes and deactivation must not survive in an old JWT
     await db.commit()
     await db.refresh(u)
     lookups.invalidate_users()
@@ -99,8 +101,9 @@ async def reset_password(user_id: int, body: ResetPasswordRequest, db: DbDep, re
         raise validation_error("Weak password", [{"field": "password", "message": "at least 10 characters with a letter and a digit"}])
     u.password_hash = hash_password(body.password)
     u.updated_at = utcnow()
+    u.token_not_before = u.updated_at  # compromised-account response: every existing session of this user is invalidated
     await db.commit()
-    set_audit(request, entity="user", entity_id=u.id)
+    set_audit(request, entity="user", entity_id=u.id, after={"sessions_invalidated": True})
     return Response(status_code=204)
 
 
@@ -115,6 +118,7 @@ async def deactivate_user(user_id: int, db: DbDep, request: Request):
     before = serializers.user_item(u)
     u.is_active = False
     u.updated_at = utcnow()
+    u.token_not_before = u.updated_at
     await db.commit()
     set_audit(request, entity="user", entity_id=u.id, before=before, after={"is_active": False})
     return Response(status_code=204)

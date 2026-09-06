@@ -1,0 +1,252 @@
+{
+  "import_50": {
+    "duration_ms": 2190,
+    "first_stream_ready_ms": 1821,
+    "wall_ms": 2197,
+    "relay_paths_created": 61,
+    "warnings": 0
+  },
+  "hls_first_playlist_ms": 12,
+  "gap_analysis_ms": 3309,
+  "health_settle_s": 161,
+  "camera_ids": {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    "11": 11,
+    "12": 12,
+    "13": 13,
+    "14": 14,
+    "15": 15,
+    "16": 16,
+    "17": 17,
+    "18": 18,
+    "19": 19,
+    "20": 20,
+    "21": 21,
+    "22": 22,
+    "23": 23,
+    "24": 24,
+    "25": 25,
+    "26": 26,
+    "27": 27,
+    "28": 28,
+    "29": 29,
+    "30": 30,
+    "31": 31,
+    "32": 32,
+    "33": 33,
+    "34": 34,
+    "35": 35,
+    "36": 36,
+    "37": 37,
+    "38": 38,
+    "39": 39,
+    "40": 40,
+    "41": 41,
+    "42": 42,
+    "43": 43,
+    "44": 44,
+    "45": 45,
+    "46": 46,
+    "47": 47,
+    "48": 48,
+    "49": 49,
+    "50": 50
+  },
+  "watchlist_add_to_alert_s": 10,
+  "ws_alert_latency_ms": 2180,
+  "route_two_systems": {
+    "own_stops": 4,
+    "sandbox_stops": 16,
+    "total_distance_km": 222.15,
+    "cameras_count": 5
+  },
+  "quality": {
+    "reads_total": 286,
+    "valid_format_pct": 99.3,
+    "mean_confidence": 0.974,
+    "sightings_total": 286,
+    "unique_plates": 27
+  },
+  "reconnect_after_kick_s": 5,
+  "dashboard": {
+    "reads": {
+      "last_1h": 293,
+      "last_24h": 293,
+      "total": 293,
+      "last_read_at": "2026-09-05T05:07:59.494Z"
+    },
+    "alerts": {
+      "new": 10,
+      "acknowledged": 1,
+      "last_24h": 11,
+      "critical_open": 5,
+      "avg_latency_ms_24h": 3200
+    },
+    "object_counts_24h": {
+      "person": 0,
+      "car": 0,
+      "motorcycle": 0,
+      "bus": 0,
+      "truck": 0,
+      "bicycle": 0
+    },
+    "anpr_workers": [
+      {
+        "id": "preindex-cpu",
+        "mode": "preindex",
+        "gpu": false,
+        "version": "1.0.0-phase1",
+        "detector": "contour",
+        "cameras": 1,
+        "camera_states": [
+          {
+            "id": 60,
+            "reads": 16,
+            "state": "running",
+            "frames": 178,
+            "fps_actual": 0.5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.290Z",
+            "decoder_restarts": 0
+          }
+        ],
+        "fps_total": 0.5,
+        "started_at": "2026-09-05T05:00:41.931Z",
+        "last_heartbeat_at": "2026-09-05T05:07:50.548Z",
+        "stale": false,
+        "extra": {
+          "detector": {
+            "active": "contour",
+            "weights": null,
+            "degraded": false,
+            "providers": [],
+            "requested": "contour"
+          },
+          "object_weights": null
+        },
+        "degraded": false
+      },
+      {
+        "id": "live-cpu",
+        "mode": "live",
+        "gpu": false,
+        "version": "1.0.0-phase1",
+        "detector": "contour",
+        "cameras": 8,
+        "camera_states": [
+          {
+            "id": 1,
+            "reads": 31,
+            "state": "running",
+            "frames": 1778,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.506Z",
+            "decoder_restarts": 0
+          },
+          {
+            "id": 2,
+            "reads": 32,
+            "state": "running",
+            "frames": 1784,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.499Z",
+            "decoder_restarts": 0
+          },
+          {
+            "id": 3,
+            "reads": 30,
+            "state": "running",
+            "frames": 1782,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.496Z",
+            "decoder_restarts": 0
+          },
+          {
+            "id": 4,
+            "reads": 43,
+            "state": "running",
+            "frames": 1784,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.592Z",
+            "decoder_restarts": 0
+          },
+          {
+            "id": 5,
+            "reads": 31,
+            "state": "running",
+            "frames": 1781,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.512Z",
+            "decoder_restarts": 0
+          },
+          {
+            "id": 6,
+            "reads": 31,
+            "state": "running",
+            "frames": 1781,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.506Z",
+            "decoder_restarts": 0
+          },
+          {
+            "id": 7,
+            "reads": 31,
+            "state": "running",
+            "frames": 1778,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.590Z",
+            "decoder_restarts": 0
+          },
+          {
+            "id": 8,
+            "reads": 39,
+            "state": "running",
+            "frames": 1790,
+            "fps_actual": 5,
+            "last_error": null,
+            "last_frame_at": "2026-09-05T05:07:50.577Z",
+            "decoder_restarts": 0
+          }
+        ],
+        "fps_total": 40,
+        "started_at": "2026-09-05T05:00:41.930Z",
+        "last_heartbeat_at": "2026-09-05T05:07:50.651Z",
+        "stale": false,
+        "extra": {
+          "detector": {
+            "active": "contour",
+            "weights": null,
+            "degraded": false,
+            "providers": [],
+            "requested": "contour"
+          },
+          "object_weights": null
+        },
+        "degraded": false
+      }
+    ]
+  },
+  "alert_latency": {
+    "n": 11,
+    "p50_ms": 3431,
+    "p95_ms": 4050,
+    "max_ms": 4050
+  },
+  "open_alerts_after_run": 12
+}

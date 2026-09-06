@@ -14,7 +14,7 @@ from app.core.hashing import abs_path, media_url
 from app.core.tz import iso_z, utcnow
 from app.services.audit import set_audit
 from app.services.mediamtx_client import client as mtx
-from app.services.mediamtx_client import play_path, relay_path
+from app.services.mediamtx_client import play_path, relay_path, whep_supported
 from app.services.scope import scoped_camera
 
 router = APIRouter(tags=["streams"], dependencies=[Depends(require_permission("cameras.read"))])
@@ -25,7 +25,7 @@ async def get_stream(camera_id: int, user: CurrentUser, db: DbDep, request: Requ
     cam = await scoped_camera(db, user_scope(user), camera_id, include_retired=False)
     if cam is None:
         raise not_found("Camera not found")
-    pp = play_path(cam.id, cam.codec) if cam.rtsp_url else None
+    pp = play_path(cam.id, cam.codec, cam.meta) if cam.rtsp_url else None
     snap_rel = f"snapshots/cam_{cam.id}.jpg"
     snap = abs_path(snap_rel)
     snapshot_url = snapshot_updated = None
@@ -41,8 +41,14 @@ async def get_stream(camera_id: int, user: CurrentUser, db: DbDep, request: Requ
         if item is not None:
             ready = bool(item.get("ready"))
             readers = len(item.get("readers") or [])
+    whep_ok = whep_supported(cam.codec, cam.meta)
     set_audit(request, action="stream.view", entity="camera", entity_id=cam.id, after={"play_path": pp})
     return {
+        # Browser start mode: WebRTC unless the relay cannot serve this stream over WebRTC (B-frame H.264), then HLS.
+        "whep_supported": whep_ok,
+        # True when the play path is the relay's libx264 re-encode (H.265 source, or H.264 with B-frames)
+        "transcoded": bool(pp) and pp != relay_path(cam.id),
+        "preferred_mode": "whep" if whep_ok else "hls",
         "camera_id": cam.id,
         "name": cam.name,
         "codec": cam.codec,

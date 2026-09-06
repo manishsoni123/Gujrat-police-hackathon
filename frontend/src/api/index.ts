@@ -22,6 +22,7 @@ import type {
   Department,
   Detection,
   DetectionDetail,
+  EnrichmentUploadResult,
   EventInput,
   EventItem,
   EvidenceVerify,
@@ -52,6 +53,7 @@ import type {
   StreamInfo,
   UserInput,
   UserRow,
+  SarthiLookup,
   VahanLookup,
   VehicleRoute,
   VehicleSearchResult,
@@ -85,8 +87,18 @@ export const camerasApi = {
   health: (id: number, hours = 24) => api<CameraHealth>(`/cameras/${id}/health`, { query: { hours } }),
   exportCsv: (params?: Query) => downloadFile('/cameras/export', { ...params, format: 'csv' }, 'cameras_export.csv'),
   template: () => downloadFile('/cameras/import/template', undefined, 'cameras_template.csv'),
-  importSandbox: (measure_first_stream = true, dry_run = false) =>
-    api<SandboxImportResult>('/cameras/import/sandbox', { method: 'POST', body: { measure_first_stream, dry_run } }),
+  importSandbox: (measure_first_stream = true, dry_run = false, probe = true) =>
+    api<SandboxImportResult>('/cameras/import/sandbox', { method: 'POST', body: { measure_first_stream, dry_run, probe } }),
+  /** Organiser sandbox with an uploaded cameras.json and/or enrichment CSV (kept server-side as the "last upload"). */
+  importSandboxFile: (files: { camerasJson?: File | null; enrichmentCsv?: File | null }, opts: { measure_first_stream?: boolean; dry_run?: boolean; probe?: boolean } = {}) => {
+    const fd = new FormData();
+    if (files.camerasJson) fd.append('cameras_json', files.camerasJson);
+    if (files.enrichmentCsv) fd.append('enrichment_csv', files.enrichmentCsv);
+    fd.append('dry_run', opts.dry_run ? 'true' : 'false');
+    fd.append('measure_first_stream', opts.measure_first_stream === false ? 'false' : 'true');
+    fd.append('probe', opts.probe === false ? 'false' : 'true');
+    return api<SandboxImportResult>('/cameras/import/sandbox/file', { method: 'POST', formData: fd });
+  },
   importCsv: (file: File, dry_run: boolean) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -203,13 +215,19 @@ export const evidenceApi = {
 
 export const externalApi = {
   vahan: (plate: string) => api<VahanLookup>(`/external/vahan/${encodeURIComponent(plate)}`),
+  sarthi: (dlNumber: string) => api<SarthiLookup>(`/external/sarthi/${encodeURIComponent(dlNumber)}`),
 };
 
 export const settingsApi = {
   list: () => api<{ items: SettingItem[] }>('/settings'),
   update: (values: Record<string, SettingValue>) => api<{ items: SettingItem[] }>('/settings', { method: 'PUT', body: { values } }),
-  testCatalogue: (overrides?: Record<string, SettingValue>) =>
+  testCatalogue: (overrides?: Record<string, SettingValue | undefined>) =>
     api<CatalogueTestResult>('/settings/catalogue/test', { method: 'POST', body: overrides ?? {} }),
+  uploadEnrichment: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api<EnrichmentUploadResult>('/settings/catalogue/enrichment', { method: 'POST', formData: fd });
+  },
   public: () => api<PublicSettings>('/settings/public'),
 };
 

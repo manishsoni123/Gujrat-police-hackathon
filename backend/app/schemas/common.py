@@ -25,13 +25,21 @@ class Page(BaseModel, Generic[T]):
     page_size: int
 
 
+ABSOLUTE_MAX_PAGE_SIZE = 500  # /detections and /audit; every other list caps at DEFAULT_MAX_PAGE_SIZE (§3.2)
+DEFAULT_MAX_PAGE_SIZE = 200
+
+
 class PageParams:
-    """Dependency: page/page_size/sort/order with a per-endpoint sort whitelist."""
+    """Dependency: page/page_size/sort/order with a per-endpoint sort whitelist.
+
+    `page_size` above the endpoint's maximum is a `422` naming that maximum (CONTRACT §3.2), never a
+    silent clamp — a client paging with 300 must not receive 200 rows while believing it asked for 300.
+    """
 
     def __init__(
         self,
         page: int = Query(1, ge=1),
-        page_size: int = Query(25, ge=1, le=500),
+        page_size: int = Query(25, ge=1),
         sort: str | None = Query(None),
         order: str | None = Query(None, pattern="^(asc|desc)$"),
     ) -> None:
@@ -39,10 +47,14 @@ class PageParams:
         self.page_size = page_size
         self.sort = sort
         self.order = order
+        self.check_page_size(ABSOLUTE_MAX_PAGE_SIZE)
 
-    def resolve(self, whitelist: dict[str, Any], default_sort: str, default_order: str, max_size: int = 200):
+    def check_page_size(self, max_size: int) -> None:
         if self.page_size > max_size:
-            self.page_size = max_size
+            raise validation_error("Invalid page_size", [{"field": "page_size", "message": f"must be <= {max_size}"}])
+
+    def resolve(self, whitelist: dict[str, Any], default_sort: str, default_order: str, max_size: int = DEFAULT_MAX_PAGE_SIZE):
+        self.check_page_size(max_size)
         sort = self.sort or default_sort
         if sort not in whitelist:
             raise validation_error(

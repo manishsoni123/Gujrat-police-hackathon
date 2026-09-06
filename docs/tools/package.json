@@ -1,0 +1,21 @@
+{
+  "name": "sentinel-gujarat-doc-tools",
+  "version": "1.0.0-phase1",
+  "private": true,
+  "description": "Submission deliverable tooling for Sentinel Gujarat: Markdown -> PDF export and PPTX/PDF presentation build (run locally with Node 24)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "export-pdf": "node export-pdf.mjs",
+    "build-presentation": "node build-presentation.mjs",
+    "deliverables": "node export-pdf.mjs && node build-presentation.mjs"
+  },
+  "devDependencies": {
+    "marked": "^15.0.0",
+    "mermaid": "^11.4.0",
+    "pptxgenjs": "^4.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

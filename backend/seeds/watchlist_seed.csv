@@ -1,24 +1,21 @@
 plate,entity_type,name,reason,priority,source,notes,expires_at,is_active
-GJ01AB1234,vehicle,White Maruti Swift – FIR 123/2026 Sector 7 PS,stolen,critical,own,Reported stolen 2026-08-30 from Sector 7 Gandhinagar,,true
-GJ18CD5678,vehicle,Grey Hyundai Creta – wanted in Kalupur case,wanted,critical,egujcop,eGujCop reference EGC-2026-004411 – inactive by default so only one anchor plate raises critical alerts on the synthetic loop; activate it for a second live-hit demo,,false
-GJ05RS9012,vehicle,Blacklisted goods carrier (overloading),blacklisted,high,manual,RTO blacklist – repeat offender,,true
-MH02BZ7788,vehicle,Silver Honda City – missing person's vehicle,missing,medium,own,Missing person report MPR-2026-0912,,true
-GJ06KL4455,vehicle,Suspect vehicle – chain snatching pattern,suspect,low,manual,Seen near Infocity thrice,2026-12-31T18:30:00Z,true
+GJ01AB1234,vehicle,White Maruti Swift – FIR 123/2026 Sector 7 PS,stolen,critical,own,Reported stolen 2026-08-30 from Sector 7 Gandhinagar (synthetic anchor: own-gate loop),,true
+GJ18CD5678,vehicle,Grey Hyundai Creta – wanted in Kalupur case,wanted,critical,egujcop,eGujCop reference EGC-2026-004411 – synthetic anchor (mock loops); inactive by default so only one anchor plate raises critical alerts on the synthetic loop; activate it for a second live-hit demo,,false
+GJ05RS9012,vehicle,Blacklisted goods carrier (overloading),blacklisted,high,manual,RTO blacklist – repeat offender (synthetic anchor: mock loops),,true
+MH02BZ7788,vehicle,Silver Honda City – missing person's vehicle,missing,medium,own,Missing person report MPR-2026-0912 (synthetic anchor: mock loops),,true
+GJ06KL4455,vehicle,Suspect vehicle – chain snatching pattern,suspect,low,manual,Seen near Infocity thrice (synthetic anchor),2026-12-31T18:30:00Z,true
 GJ27XY3456,vehicle,Demo plate (added live during the jury demo),suspect,low,manual,Not active by default – the demo adds it,,false
-GJ01CJ7788,vehicle,Black Toyota Fortuner – stolen,stolen,critical,own,,,true
-GJ03BM2210,vehicle,Red Bajaj Pulsar – stolen two-wheeler,stolen,high,own,,,true
-GJ05JE9834,vehicle,Wanted – Surat cheating case,wanted,critical,egujcop,,,true
-GJ12AK1001,vehicle,Blacklisted taxi – permit cancelled,blacklisted,medium,vahan,,,true
-GJ33AT5566,vehicle,Suspect – border movement Dahod,suspect,low,manual,,,true
-GJ38CH0007,vehicle,Suspect – Valsad narcotics watch,suspect,medium,manual,,,true
-DL3CAB9911,vehicle,Wanted – interstate,wanted,high,egujcop,,,true
-RJ14CV3030,vehicle,Stolen in Rajasthan – NCRB advisory,stolen,high,egujcop,,,true
-MP09HB6161,vehicle,Blacklisted – toll evasion,blacklisted,low,manual,,,true
-GJ10AD7070,vehicle,Missing – elderly driver,missing,medium,own,,,true
-GJ15CQ2424,vehicle,Suspect – Rajkot burglary pattern,suspect,low,manual,,2026-10-31T18:30:00Z,true
-GJ21AR8181,vehicle,Arrested person's vehicle (impound pending),arrested,high,egujcop,,,true
-KA01MJ4545,vehicle,Wanted – Bengaluru case (interstate lookout),wanted,high,egujcop,,,true
-GJ09BW0110,vehicle,Expired entry (kept for history),blacklisted,low,manual,,2026-08-01T00:00:00Z,true
+GJ32AG2319,vehicle,Two-wheeler – stolen (Gir Somnath) – read on cam07,stolen,critical,own,Government feed: read twice on cam07 Bhavani junction (Gir Somnath) 05 Sep 2026 21:43 IST conf 0.91 / 0.90; plate confirmed by eye on the crop,,true
+GJ14AA3978,vehicle,Wanted – Gir Somnath cheating case – read on cam07,wanted,high,egujcop,Government feed: read on cam07 05 Sep 2026 21:06 IST conf 0.83; plate confirmed by eye on the crop,,true
+GJ32K0225,vehicle,Suspect – repeated night movement near the showroom – read on cam07,suspect,medium,manual,Government feed: read on cam07 05 Sep 2026 21:39 IST conf 0.70; plate confirmed by eye on the crop,,true
+GJ10OG9093,vehicle,Blacklisted taxi – permit cancelled – read on cam07,blacklisted,medium,vahan,Government feed: read on cam07 05 Sep 2026 21:43 IST conf 0.90; series letters O/D ambiguous by eye,,true
+GJ3B7160,vehicle,Missing person's two-wheeler – read on cam07,missing,low,own,Government feed: read on cam07 05 Sep 2026 20:31 IST conf 0.84 as GJ3B7160; by eye the plate reads GJ 38 ? 7160 (series letter unclear) – kept as read so a re-read matches exactly and the by-eye form matches fuzzily,,true
+GJ10F0032,vehicle,Wanted – Junagadh hit-and-run – read on cam07,wanted,critical,egujcop,Government feed: read on cam07 05 Sep 2026 22:09 IST conf 0.88; plate confirmed by eye on the crop,,true
+GJ32AA4959,vehicle,Suspect – night movement Veraval – read on cam07,suspect,medium,manual,Government feed: read on cam07 05 Sep 2026 22:12 IST conf 0.88; plate confirmed by eye on the crop,,true
+GJ32AG5511,vehicle,Suspect two-wheeler – Veraval narcotics watch – read on cam07,suspect,low,manual,Government feed: read on cam07 05 Sep 2026 20:16 IST as FGJ32AG5511 conf 0.64 (invalid format because of the leading F); by eye the crop reads GJ 32 AG 5511,,true
+GJ32X9785,vehicle,Wanted – Veraval case – read on cam07 (survey),wanted,high,egujcop,Government feed: the one valid read of the 30-camera readability survey (scripts/survey_anpr.py) – cam07 84 px conf 0.81 (docs/anpr-camera-selection.md),,true
+GJ36AJ2890,vehicle,Suspect two-wheeler – read on cam07 (crop bank),suspect,medium,manual,Government feed: crop bank media/anpr_crops labels.csv – cam07 94 px every glyph legible by hand (docs/anpr-accuracy.md §3),,true
+GJ32D3783,vehicle,Stolen two-wheeler – read on cam07 (crop bank),stolen,high,own,Government feed: crop bank labels.csv – cam07 92 px; 5th glyph D/0 ambiguous (D by the Indian format),,true
 ,person,Ramesh K. (wanted – Ahmedabad PS),wanted,critical,egujcop,FRS roadmap – no plate,,true
 ,person,Unidentified body case UDB-2026-17,unidentified_body,medium,manual,AFIS/NAFIS readiness placeholder,,true
 ,person,Missing minor – Surat,missing,high,own,,,true

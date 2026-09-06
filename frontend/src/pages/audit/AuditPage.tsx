@@ -13,13 +13,14 @@ import { EmptyState, ErrorState } from '@/components/States';
 import { ExportDialog } from '@/components/Dialogs';
 import { RangeIst, type IsoRange } from '@/components/RangeIst';
 import { fmtIst } from '@/utils/time';
+import { maskUrlCredentials } from '@/utils/url';
 
 const ACTION_GROUPS = ['auth.', 'user.', 'apikey.', 'camera.', 'stream.', 'recording.', 'clip.', 'watchlist.', 'alert.', 'event.', 'vehicle.', 'report.', 'evidence.', 'settings.', 'webhook.', 'zone.', 'qa.', 'retention.', 'external.'];
 
 function DiffView({ before, after }: { before: Record<string, unknown> | null; after: Record<string, unknown> | null }) {
   const keys = Array.from(new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]));
   if (!keys.length) return <Typography.Text type="secondary">No before/after payload recorded for this action.</Typography.Text>;
-  const fmt = (v: unknown) => (v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v));
+  const fmt = (v: unknown) => (v === undefined ? '' : maskUrlCredentials(typeof v === 'string' ? v : JSON.stringify(v)));
   return (
     <Table
       size="small"

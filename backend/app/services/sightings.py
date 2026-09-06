@@ -261,6 +261,13 @@ async def upsert_object_counts(db: AsyncSession, camera_id: int, counts: list[Ob
 
 
 async def create_worker_events(db: AsyncSession, cam: Camera, events: list[EventIn], files: dict[str, bytes], rejected: list[dict[str, Any]]) -> int:
+    """Insert worker events (`loop_reset`, `intrusion`) idempotently.
+
+    The worker re-sends a whole batch after a timeout/5xx (CONTRACT §7.7), so an event that is
+    already stored — same camera, type, `occurred_at` and note, enforced by the partial unique
+    index `uq_events_worker_dedup` — is reported as `rejected` with reason `duplicate`: no second
+    row, no frame file, no intrusion-alert `read_count` bump, no broadcast (mirrors `_insert_read_once`).
+    """
     n = 0
     now = utcnow()
     for idx, ev in enumerate(events):
@@ -271,20 +278,27 @@ async def create_worker_events(db: AsyncSession, cam: Camera, events: list[Event
         if occurred is None:
             rejected.append({"index": idx, "kind": "event", "reason": "invalid occurred_at"})
             continue
+        frame_bytes: bytes | None = None
         frame_path = frame_sha = None
         if ev.frame_file:
             err = _validate_jpeg(files.get(ev.frame_file), MAX_FRAME_BYTES)
             if err:
                 rejected.append({"index": idx, "kind": "event_frame", "reason": f"frame_file '{ev.frame_file}' {err}"})
             else:
+                frame_bytes = files[ev.frame_file]
                 frame_path = f"frames/{cam.id}/{utc_date_dir(now)}/{cam.id}-intrusion-{epoch_ms(occurred)}.jpg"
-                frame_sha, _ = write_bytes_hashed(frame_path, files[ev.frame_file])
+                frame_sha = hashlib.sha256(frame_bytes).hexdigest()
         note = ev.note
         if ev.type == "loop_reset" and not note and ev.stream_pts_before is not None:
             note = f"pts {ev.stream_pts_before} -> {ev.stream_pts_after} (discontinuity)"
-        event = Event(camera_id=cam.id, occurred_at=occurred, type=ev.type, note=note, frame_path=frame_path, frame_sha256=frame_sha, is_auto=True, created_at=now)
-        db.add(event)
-        await db.flush()
+        event_id = await _insert_event_once(db, {"camera_id": cam.id, "occurred_at": occurred, "type": ev.type, "note": note, "frame_path": frame_path, "frame_sha256": frame_sha, "is_auto": True, "created_at": now})
+        if event_id is None:
+            rejected.append({"index": idx, "kind": "event", "reason": "duplicate"})
+            continue
+        if frame_bytes is not None and frame_path is not None:
+            write_bytes_hashed(frame_path, frame_bytes)  # only after the row is ours: no orphan frames on replays
+        event = await db.get(Event, event_id)
+        assert event is not None
         n += 1
         if ev.type == "intrusion":
             alert = await _intrusion_alert(db, cam, ev, event, now)
@@ -292,6 +306,12 @@ async def create_worker_events(db: AsyncSession, cam: Camera, events: list[Event
                 event.alert_id = alert.id
         manager.broadcast(_reads_channel(cam.id), "event", serializers.event_item(event, cam), cam.department_id, cam.district)
     return n
+
+
+async def _insert_event_once(db: AsyncSession, values: dict[str, Any]) -> int | None:
+    """INSERT … ON CONFLICT DO NOTHING (any unique violation = `uq_events_worker_dedup`); new id or None."""
+    stmt = pg_insert(Event).values(**values).on_conflict_do_nothing().returning(Event.id)
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 async def _intrusion_alert(db: AsyncSession, cam: Camera, ev: EventIn, event: Event, now: datetime) -> Alert | None:

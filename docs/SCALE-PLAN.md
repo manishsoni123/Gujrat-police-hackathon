@@ -6,7 +6,7 @@
 | **Team** | Dynatech Consultancy · Category 2 |
 | **Product** | Sentinel Gujarat `1.0.0-phase1` · Model 1 + Model 2 (hybrid roadmap to 3/4) |
 | **Scope of this document** | Scalability strategy required by guide §7.2: central/regional/edge compute, GPU sizing, bandwidth and low-bandwidth strategy, hot/warm/cold storage by retention, load balancing and horizontal scaling, monitoring/logging/health checks, HA/backup/DR, cybersecurity controls, **estimated implementation and operational cost**, **cost-benefit**, **phased rollout**, and the **measured figures** from our Phase 1 soak that anchor the extrapolation |
-| **Status** | Near-final draft, 5 September 2026. §1.1 carries the figures measured on the CPU-only laptop integration run; the two GPU rows are filled from the VM soak before PDF export |
+| **Status** | Final draft, 5 September 2026. §1.1 carries the figures measured on the CPU-only laptop integration run; **no GPU measurement exists in this submission** — the two GPU rows state that explicitly and the extrapolation uses vendor planning values, marked as such wherever they appear |
 
 All costs are order-of-magnitude planning estimates in Indian Rupees (₹ Cr = crore = 10⁷; ₹ L = lakh = 10⁵) at September 2026 list prices, before GST, excluding land and civil works. Every assumption is stated so that SCRB can re-run the arithmetic with its own numbers.
 
@@ -20,8 +20,8 @@ Phase 1 runs the entire stack — relay, API, database, ANPR live and pre-index 
 
 | Figure | Where measured | Value | Planning value used below |
 |---|---|---|---|
-| Cameras per T4-class GPU at 5 fps (live mode) | `anpr-live-gpu` heartbeat `fps_actual` ≥ 4.5 on N cameras | not measured in Phase 1 (no GPU on the integration laptop); to be filled from the VM soak | 16 |
-| Cameras per T4-class GPU at keyframe rate (pre-index) | `anpr-preindex-gpu` heartbeat | not measured in Phase 1 (no GPU); to be filled from the VM soak | 36 |
+| Cameras per T4-class GPU at 5 fps (live mode) | `anpr-live-gpu` heartbeat `fps_actual` ≥ 4.5 on N cameras | **not measured** — the Phase 1 integration ran CPU-only (no GPU available to the team); the planning value is the NVIDIA NVDEC/T4 vendor figure (§3.1) and is used unverified | 16 (vendor) |
+| Cameras per T4-class GPU at keyframe rate (pre-index) | `anpr-preindex-gpu` heartbeat | **not measured** — same reason; vendor figure, unverified | 36 (vendor) |
 | Cameras per 8-core CPU-only host at 2–3 fps | `anpr-live` with `CPU=1` on the laptop | **8 cameras** decoded at 5 fps each (40 fps), 19–21 frames/s inferred (≈ 2.5 fps per camera effective) on 2.7 cores of a 12-thread i5-1345U, PaddleOCR 270–470 ms/crop; 2.0–2.3 GB RSS | 3 |
 | Detections (reads) per second sustained by one API process | soak: `reads.last_1h / 3600` from `/dashboard/stats` while worker fps stayed nominal | content-bound on the mock (0.3 reads/s from 8 loops); measured **cost** 15–40 ms per `/internal/detections` batch and 12–20 ms per snapshot at ≈ 16 internal requests/s and 8–14 % of one core ⇒ ≥ 100 batches/s per core before saturation | 150 |
 | DB size per 1,000 sightings (rows + indexes, incl. reads) | `pg_total_relation_size` on `sightings` + `plate_reads` ÷ count | **2.5 MB** (794 KB for 314 sightings + 315 reads; small-table index overhead included) | 1.2 MB |
@@ -31,7 +31,7 @@ Phase 1 runs the entire stack — relay, API, database, ANPR live and pre-index 
 | Relay: concurrent WebRTC viewers per relay core | wall test, `docker stats` on `mediamtx` | 9 WHEP viewers + 9 RTSP readers (ANPR) + 9 recorded paths + 1 libx264 transcode at **15–80 % of one core** (720p, ~300 kbps) ⇒ ≥ 40 viewers per core is conservative | 40 per core |
 | Recording bytes per camera-hour (720p/1080p) | `recordings_used_bytes` ÷ camera-hours | **≈ 120 MB per camera-hour** for the 720p synthetic loops (~300 kbps fMP4); real 1080p cameras at 2 Mbps scale to the planning value | 0.9 GB/h at 2 Mbps |
 
-The measured cells come from the 5 Sept 2026 integration run on the CPU-only laptop (acceptance checks 5, 12, 13, 14; `docs/acceptance-log.md`, README "Measured on a 12-core laptop"); the GPU rows are filled from the VM soak (`scripts/soak_run.sh`) before submission. The planning values are conservative vendor-data figures that the measurement is expected to match or beat.
+The measured cells come from the 5 Sept 2026 integration run on the CPU-only laptop (acceptance checks 5, 12, 13, 14; `docs/acceptance-log.md`, README "Measured on a 12-core laptop"). The two GPU rows are **not measured** in this submission: no GPU host was available, so the sizing in §2–§4 rests on vendor decode figures, and the first GPU soak (`scripts/soak_run.sh` with the `gpu` profile, on the hosted VM or in Phase 2) replaces them. Every other planning value is a conservative vendor-data figure that the laptop measurement met or beat.
 
 ---
 
@@ -251,7 +251,7 @@ Recommended variant: **record at the district PoP** (same Ceph pools, distribute
 | Metrics | Prometheus + Grafana; exporters for PostgreSQL, Kafka, Ceph, node, NVIDIA DCGM; MediaMTX metrics endpoint | reads/s, alert latency p95, worker `fps_actual`, decoder restarts, relay bytes, GPU utilisation, queue lag |
 | Logs | Loki (containers already log JSON lines) | structured request logs, worker heartbeats, audit mirror |
 | Traces | OpenTelemetry → Tempo (read → alert critical path) | latency breakdown |
-| Health checks | `/healthz` on every service (already present); Kubernetes liveness/readiness; synthetic probes (login, search, WHEP) from each district | availability SLO 99.9 % core, 99.5 % per district |
+| Health checks | Today: Docker healthchecks on postgres, mediamtx, api and web plus `/healthz` on the API, and worker liveness by heartbeat age (`/health`); at scale: Kubernetes liveness/readiness on every pod, including the ANPR workers (heartbeat-file probe); synthetic probes (login, search, WHEP) from each district | availability SLO 99.9 % core, 99.5 % per district |
 | Camera health | The existing poller per district (MediaMTX ready + ffprobe) → `camera_health_log` → dashboards, offline alerts, AMC lists | uptime % per camera / department / district |
 | Alerting | Alertmanager → NOC (24×7) via e-mail/SMS/Telegram; runbooks per alert | |
 
@@ -437,4 +437,4 @@ Each phase re-runs the same acceptance checks (`CONTRACT.md` §13.3) on the new 
 
 ---
 
-*Sentinel Gujarat · Dynatech Consultancy · Plan for Scale v1.0.0-phase1 · Model 1 + Model 2 (hybrid roadmap to 3/4) · laptop figures measured 5 Sept 2026; GPU figures are replaced from the Phase 1 VM soak before submission.*
+*Sentinel Gujarat · Dynatech Consultancy · Plan for Scale v1.0.0-phase1 · Model 1 + Model 2 (hybrid roadmap to 3/4) · laptop figures measured 5 Sept 2026; GPU cameras-per-card figures are vendor planning values, not measured in this submission.*

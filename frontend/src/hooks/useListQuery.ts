@@ -1,5 +1,5 @@
 /** Paginated table state (page/page_size/sort/order + filters) synced with TanStack Query. */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type HTMLAttributes, type KeyboardEvent } from 'react';
 import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { TablePaginationConfig } from 'antd';
 import type { SorterResult } from 'antd/es/table/interface';
@@ -78,4 +78,26 @@ export function useListQuery<T>(opts: UseListQueryOptions<T>): UseListQueryResul
   };
 
   return { query, items: query.data?.items ?? [], total, state, setPage, pagination, onTableChange, reset };
+}
+
+/**
+ * Row props for tables whose rows open a drawer or navigate: click **and** keyboard (Tab to the row,
+ * Enter or Space to open), with the row exposed as a button to assistive technology. Pass `undefined`
+ * as the handler for rows that have no action (no cursor, not focusable).
+ */
+export function rowProps(onOpen: (() => void) | undefined): HTMLAttributes<HTMLTableRowElement> {
+  if (!onOpen) return { style: { cursor: 'default' } };
+  return {
+    onClick: onOpen,
+    tabIndex: 0,
+    role: 'button',
+    style: { cursor: 'pointer' },
+    onKeyDown: (e: KeyboardEvent<HTMLTableRowElement>) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onOpen();
+      }
+    },
+  };
 }

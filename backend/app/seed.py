@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import DEFAULT_BULK_API_KEY, settings
 from app.core.security import api_key_prefix, hash_api_key, hash_password, valid_api_key_format
 from app.core.tz import parse_iso, utcnow
 from app.db.models import ApiKey, Department, District, Poi, Setting, User, Watchlist
@@ -107,23 +107,39 @@ def _legacy_password_marker(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+def seed_key_active(env_name: str, key: str, public: bool) -> bool:
+    """A `bulk` key equal to the published repository default is seeded **inactive** on a public
+    deployment: `/api/v1/cameras/bulk` is reachable from the Internet through Caddy and the default
+    key is printed in README/CONTRACT. The internal key stays active (Caddy blocks `/api/internal/*`
+    from outside) but is reported by `default_secrets_in_use`."""
+    return not (public and env_name == "BULK_API_KEY" and key == DEFAULT_BULK_API_KEY)
+
+
 async def seed_api_keys(db: AsyncSession) -> dict[str, int]:
     admin = (await db.execute(select(User).where(User.username == "jury_admin"))).scalar_one_or_none()
-    added = rotated = 0
-    for name, scope, key in (("seed-bulk", "bulk", settings.BULK_API_KEY), ("seed-internal", "internal", settings.INTERNAL_API_KEY)):
+    added = rotated = deactivated = 0
+    public = settings.is_public
+    for name, scope, env_name in (("seed-bulk", "bulk", "BULK_API_KEY"), ("seed-internal", "internal", "INTERNAL_API_KEY")):
+        key = getattr(settings, env_name)
         if not valid_api_key_format(key):
             log.warning("API key for %s does not match sk_[0-9a-z]{40}; skipped", name)
             continue
+        active = seed_key_active(env_name, key, public)
+        if not active:
+            log.error("%s is the repository default on a public deployment: the seeded '%s' key is inactive until it is rotated in deploy/.env", env_name, name)
         row = (await db.execute(select(ApiKey).where(ApiKey.name == name))).scalar_one_or_none()
         h = hash_api_key(key)
         if row is None:
-            db.add(ApiKey(name=name, key_hash=h, key_prefix=api_key_prefix(key), scope=scope, created_by=admin.id if admin else None, is_active=True, created_at=utcnow()))
+            db.add(ApiKey(name=name, key_hash=h, key_prefix=api_key_prefix(key), scope=scope, created_by=admin.id if admin else None, is_active=active, created_at=utcnow()))
             added += 1
         elif row.key_hash != h:
-            row.key_hash, row.key_prefix, row.is_active = h, api_key_prefix(key), True
+            row.key_hash, row.key_prefix, row.is_active = h, api_key_prefix(key), active
             rotated += 1
+        elif not active and row.is_active:
+            row.is_active = False
+            deactivated += 1
     await db.commit()
-    return {"added": added, "rotated": rotated}
+    return {"added": added, "rotated": rotated, "deactivated": deactivated}
 
 
 async def seed_pois(db: AsyncSession, seeds: Path) -> dict[str, int]:
@@ -225,7 +241,16 @@ async def seed_watchlist(db: AsyncSession, seeds: Path) -> dict[str, int]:
 
 # Revision of the seeded watchlist rows. Existing databases only ever *add* missing rows, so a
 # change to an already-seeded anchor row is applied once here, keyed by `seed.watchlist_rev`.
-WATCHLIST_SEED_REV = 2
+WATCHLIST_SEED_REV = 3
+
+# rev 3 (5 Sept 2026, government feed): the fourteen synthetic filler plates of seed rev 1-2 (rows 7-20 of
+# the old CSV, never read by any camera) are retired - deactivated, never deleted, so alert history and
+# hit counts stay - and the CSV now carries the plates actually read on the organiser cameras instead.
+RETIRED_FILLER_PLATES = (
+    "GJ01CJ7788", "GJ03BM2210", "GJ05JE9834", "GJ12AK1001", "GJ33AT5566", "GJ38CH0007", "DL3CAB9911",
+    "RJ14CV3030", "MP09HB6161", "GJ10AD7070", "GJ15CQ2424", "GJ21AR8181", "KA01MJ4545", "GJ09BW0110",
+)
+RETIRED_NOTE = "retired by seed rev 3 (synthetic filler plate, never read on any feed; replaced by plates read on the government cameras)"
 
 
 async def _upgrade_watchlist_seed(db: AsyncSession, vehicles: dict[str, Watchlist], now: Any) -> int:
@@ -240,6 +265,13 @@ async def _upgrade_watchlist_seed(db: AsyncSession, vehicles: dict[str, Watchlis
         if w is not None and w.is_active and w.id is not None:
             w.is_active, w.updated_at = False, now
             upgraded += 1
+    if current < 3:
+        for plate in RETIRED_FILLER_PLATES:
+            w = vehicles.get(plate)
+            if w is not None and w.id is not None and w.is_active:
+                w.is_active, w.updated_at = False, now
+                w.notes = (f"{w.notes} | " if w.notes else "") + RETIRED_NOTE
+                upgraded += 1
     if marker is None:
         db.add(Setting(key="seed.watchlist_rev", value=WATCHLIST_SEED_REV, is_secret=False, updated_at=now))
     elif current < WATCHLIST_SEED_REV:

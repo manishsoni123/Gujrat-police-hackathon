@@ -43,6 +43,10 @@ class Settings:
     det_model: str = "/app/weights/yolo-v9-t-384-license-plates-end2end.onnx"
     det_conf: float = 0.4
     min_plate_w: int = 60
+    det_tile: int = 0                       # ANPR_DET_TILE: tile size in px for the detector (0 = whole frame only)
+    det_tile_overlap: float = 0.15          # ANPR_DET_TILE_OVERLAP: fraction shared between neighbouring tiles
+    static_box_window: int = 20             # ANPR_STATIC_BOX_WINDOW: frames a box must persist in to count as an overlay (0 = off)
+    static_box_hits: float = 0.8            # ANPR_STATIC_BOX_HITS: share of the window a box must be present in (captions the detector boxes intermittently need less)
     vote_window_s: float = 3.0
     min_read_conf: float = 0.30
     sighting_close_s: float = 15.0
@@ -59,6 +63,32 @@ class Settings:
     reconnect_min_s: float = 2.0
     reconnect_max_s: float = 30.0
     log_level: str = "INFO"
+    # Decoder robustness on real (relay / organiser) feeds - anpr/decode.py
+    probe_timeout_s: float = 45.0           # ANPR_PROBE_TIMEOUT_S: ffprobe cap (files always; RTSP only with rtsp_probe)
+    rtsp_probe: bool = False                # ANPR_RTSP_PROBE: 1 = ffprobe RTSP sources before decoding (default: parse ffmpeg stderr)
+    rtsp_timeout_s: float = 30.0            # ANPR_RTSP_TIMEOUT_S: ffmpeg -timeout (RTSP socket I/O)
+    start_timeout_s: float = 90.0           # ANPR_START_TIMEOUT_S: budget for the first frame of a session
+    stall_timeout_s: float = 60.0           # ANPR_STALL_TIMEOUT_S: kill the decoder after this long without a frame
+    dial_spacing_s: float = 3.0             # ANPR_DIAL_SPACING_S: gap between two RTSP dials (one decoder dials at a time)
+    decode_threads: int = 2                 # ANPR_DECODE_THREADS: ffmpeg -threads per decoder (memory + CPU per camera)
+    api_timeout_s: float = 30.0             # API_TIMEOUT_S: HTTP timeout of every POST/GET to the API
+    # Burnt-in OSD / invalid-read hygiene - anpr/detector.py OsdMask, pipeline._accept_reads
+    osd_band: float = 0.08                  # ANPR_OSD_BAND: top/bottom fraction of the frame where boxes are never plates (0 = off)
+    osd_warmup_s: float = 30.0              # ANPR_OSD_WARMUP_S: seconds of frames sampled before static-text regions are applied (0 = off)
+    invalid_reads_per_min: int = 10         # ANPR_INVALID_READS_PER_MIN: cap on invalid-format reads posted per camera per minute (0 = unlimited)
+    # Real-feed accuracy pass (5 Sept 2026): OCR backend, best-shot tracking, native decode + downscaled detection, evidence
+    ocr_backend: str = "paddle"             # ANPR_OCR: paddle | fast_plate | ensemble (anpr/ocr.py)
+    ocr_fast_model: str = "global_mobile_vit_v2_ocr"   # ANPR_OCR_FAST_MODEL: fast-plate-ocr model stem in /app/weights
+    ocr_paddle_mode: str = "det"            # ANPR_OCR_PADDLE_MODE: det (det+rec, best on the organiser crops) | auto (rec-only for single-line crops) | rec
+    ocr_ensemble_min_conf: float = 0.45     # ANPR_OCR_ENSEMBLE_MIN_CONF: ensemble accepts a disagreeing read only above this
+    ocr_min_w: int = 60                     # ANPR_OCR_MIN_W: OCR only crops at least this wide (decoded-frame px); smaller boxes are vehicle detections
+    detect_width: int = 0                   # ANPR_DETECT_WIDTH: run the detector on the frame resized to this width (0 = the decoded width); crops stay native
+    best_shot: bool = True                  # ANPR_BEST_SHOT: track plates across frames and OCR the best crop per track (0 = OCR every frame)
+    track_gap_s: float = 2.0                # ANPR_TRACK_GAP_S: a track ends after this long without a matching box
+    track_keep: int = 3                     # ANPR_TRACK_KEEP: best shots kept (and OCR'd, then voted) per track
+    track_stall: int = 3                    # ANPR_TRACK_STALL: frames without growth after which a track counts as settled (OCR now)
+    evidence_dir: str = ""                  # ANPR_EVIDENCE_DIR: write one crop + JSON line per detected vehicle here (empty = off)
+    evidence_per_hour: int = 200            # ANPR_EVIDENCE_PER_HOUR: cap on evidence files per camera per hour
     # Test / tooling knobs (not in the contract table; documented in anpr/README.md)
     api_dry_run: bool = False               # API_DRY_RUN=1 prints payloads instead of POSTing
     sources: dict[int, str] = field(default_factory=dict)  # static sources: "1=/media/synthetic/cam_1.mp4"
@@ -122,6 +152,10 @@ ENV_MAP: dict[str, str] = {
     "ANPR_DET_MODEL": "det_model",
     "ANPR_DET_CONF": "det_conf",
     "ANPR_MIN_PLATE_W": "min_plate_w",
+    "ANPR_DET_TILE": "det_tile",
+    "ANPR_DET_TILE_OVERLAP": "det_tile_overlap",
+    "ANPR_STATIC_BOX_WINDOW": "static_box_window",
+    "ANPR_STATIC_BOX_HITS": "static_box_hits",
     "ANPR_VOTE_WINDOW_S": "vote_window_s",
     "ANPR_MIN_READ_CONF": "min_read_conf",
     "SIGHTING_CLOSE_S": "sighting_close_s",
@@ -138,6 +172,29 @@ ENV_MAP: dict[str, str] = {
     "RECONNECT_MIN_S": "reconnect_min_s",
     "RECONNECT_MAX_S": "reconnect_max_s",
     "LOG_LEVEL": "log_level",
+    "ANPR_PROBE_TIMEOUT_S": "probe_timeout_s",
+    "ANPR_RTSP_PROBE": "rtsp_probe",
+    "ANPR_RTSP_TIMEOUT_S": "rtsp_timeout_s",
+    "ANPR_START_TIMEOUT_S": "start_timeout_s",
+    "ANPR_STALL_TIMEOUT_S": "stall_timeout_s",
+    "ANPR_DIAL_SPACING_S": "dial_spacing_s",
+    "ANPR_DECODE_THREADS": "decode_threads",
+    "API_TIMEOUT_S": "api_timeout_s",
+    "ANPR_OSD_BAND": "osd_band",
+    "ANPR_OSD_WARMUP_S": "osd_warmup_s",
+    "ANPR_INVALID_READS_PER_MIN": "invalid_reads_per_min",
+    "ANPR_OCR": "ocr_backend",
+    "ANPR_OCR_FAST_MODEL": "ocr_fast_model",
+    "ANPR_OCR_PADDLE_MODE": "ocr_paddle_mode",
+    "ANPR_OCR_ENSEMBLE_MIN_CONF": "ocr_ensemble_min_conf",
+    "ANPR_OCR_MIN_W": "ocr_min_w",
+    "ANPR_DETECT_WIDTH": "detect_width",
+    "ANPR_BEST_SHOT": "best_shot",
+    "ANPR_TRACK_GAP_S": "track_gap_s",
+    "ANPR_TRACK_KEEP": "track_keep",
+    "ANPR_TRACK_STALL": "track_stall",
+    "ANPR_EVIDENCE_DIR": "evidence_dir",
+    "ANPR_EVIDENCE_PER_HOUR": "evidence_per_hour",
     "API_DRY_RUN": "api_dry_run",
     "ANPR_SOURCES": "sources",
     "ANPR_FILE_RE": "file_realtime",
@@ -218,6 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-cameras", type=int, help="cap on simultaneous decoders")
     parser.add_argument("--fps", type=float, help="decode fps for the active mode")
     parser.add_argument("--detector", choices=["auto", "onnx", "contour"], help="plate detector backend")
+    parser.add_argument("--ocr", choices=["paddle", "fast_plate", "ensemble"], help="OCR backend (ANPR_OCR)")
     parser.add_argument("--dry-run", action="store_true", help="print API payloads instead of POSTing")
     parser.add_argument("--no-objects", action="store_true", help="disable YOLOX object counting")
     parser.add_argument("--file-loop", type=int, help="file sources: 0 = once, -1 = forever, n = n extra loops")
@@ -259,6 +317,8 @@ def load_settings(argv: list[str] | None = None, environ: dict[str, str] | None 
         cli_overrides["max_cameras"] = args.max_cameras
     if args.detector:
         cli_overrides["detector"] = args.detector
+    if args.ocr:
+        cli_overrides["ocr_backend"] = args.ocr
     if args.dry_run:
         cli_overrides["api_dry_run"] = True
     if args.no_objects:
@@ -281,6 +341,8 @@ def load_settings(argv: list[str] | None = None, environ: dict[str, str] | None 
         raise ValueError(f"ANPR_MODE must be live or preindex, got {settings.mode!r}")
     if settings.detector not in ("auto", "onnx", "contour"):
         raise ValueError(f"ANPR_DETECTOR must be auto, onnx or contour, got {settings.detector!r}")
+    if settings.ocr_backend not in ("paddle", "fast_plate", "ensemble"):
+        raise ValueError(f"ANPR_OCR must be paddle, fast_plate or ensemble, got {settings.ocr_backend!r}")
     if settings.mode == "preindex":
         settings.object_detect = False  # never runs in preindex (contract section 7.7)
     if not settings.worker_id:

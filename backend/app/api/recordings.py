@@ -51,7 +51,7 @@ async def _camera(db, user, camera_id: int) -> Camera:
 async def list_recordings(camera_id: int, user: CurrentUser, db: DbDep, from_: str | None = Query(None, alias="from"), to: str | None = None):
     cam = await _camera(db, user, camera_id)
     t_from, t_to = parse_window(from_, to, RETENTION_H)
-    path = play_path(cam.id, cam.codec) if cam.rtsp_url else None
+    path = play_path(cam.id, cam.codec, cam.meta) if cam.rtsp_url else None
     segs: list[dict[str, Any]] = []
     if path and cam.record_enabled:
         segs = _segments(await playback_list(path, t_from, t_to), path)
@@ -60,7 +60,7 @@ async def list_recordings(camera_id: int, user: CurrentUser, db: DbDep, from_: s
 
 async def resolve_play(cam: Camera, at: datetime, before_s: int, duration_s: int) -> dict[str, Any]:
     """Find the segment containing `at - before_s`; returns the §5.16 play descriptor."""
-    path = play_path(cam.id, cam.codec) if cam.rtsp_url else None
+    path = play_path(cam.id, cam.codec, cam.meta) if cam.rtsp_url else None
     start = at - timedelta(seconds=before_s)
     if not path or not cam.record_enabled:
         return {"url": None, "start": iso_z(start), "duration_s": duration_s, "available": False, "playback_path": path}

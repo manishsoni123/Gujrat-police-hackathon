@@ -47,7 +47,7 @@ async def health_stats(db: AsyncSession, scope: Scope) -> dict[str, Any]:
     counts = await camera_counts(db, conds)
     anpr = (await db.execute(select(func.count()).select_from(Camera).where(Camera.status != "retired", Camera.anpr_enabled.is_(True), *conds))).scalar() or 0
     return {
-        "cameras": {k: counts[k] for k in ("total", "online", "degraded", "offline", "unknown")},
+        "cameras": {k: counts[k] for k in ("total", "online", "degraded", "offline", "not_streaming", "unknown")},
         "uptime_24h_pct": await uptime_24h(db, conds),
         "anpr_live_cameras": int(anpr),
         "reads_last_min": await reads_last_minute(db, conds),

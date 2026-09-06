@@ -5,7 +5,7 @@ flowchart TB
   subgraph VM["Ubuntu 22.04 VM · Docker Compose project 'sentinel'"]
     CADDY["web (caddy:2)<br/>SPA from /srv · auto-TLS<br/>/api /ws /media → api · /mtx /playback → mediamtx"]
     API["api (python:3.11-slim + ffmpeg)<br/>FastAPI · uvicorn · APScheduler"]
-    MTX["mediamtx (bluenviron/mediamtx:latest-ffmpeg)<br/>8554 RTSP · 8889 WHEP · 8888 HLS · 9996 playback · 9997 API"]
+    MTX["mediamtx (bluenviron/mediamtx:1.20.1-ffmpeg)<br/>8554 RTSP · 8889 WHEP · 8888 HLS · 9996 playback · 9997 API"]
     PG[("postgres (postgis/postgis:16-3.4)<br/>volume pgdata")]
     LIVE["anpr-live / anpr-live-gpu<br/>profile cpu | gpu"]
     PRE["anpr-preindex / anpr-preindex-gpu"]

@@ -163,7 +163,8 @@ const VENDORS = [['Hikvision', 'DS-2CD2043G2'], ['Dahua', 'IPC-HFW2431S'], ['CP 
 function makeCamera(r: Row): Camera {
   const [id, name, deptDisplay, district, lat, lon, codec, resolution, fps, live, type] = r;
   const dept = deptByCode.get(DEPT_ALIAS[deptDisplay] ?? 'UNASSIGNED') as Department;
-  const status: CameraStatus = live ? (id === 5 ? 'degraded' : 'online') : 'offline';
+  // Catalogue live=false cameras never deliver a stream: `not_streaming`, never `offline` (CONTRACT amendment 2026-09-05 §5.6).
+  const status: CameraStatus = live ? (id === 5 ? 'degraded' : 'online') : 'not_streaming';
   const [vendor, model] = VENDORS[id % VENDORS.length];
   const installYear = 2016 + (id % 9);
   const amcExpiryDays = id % 5 === 0 ? -40 : id % 3 === 0 ? 16 : 300;
@@ -210,6 +211,8 @@ function makeCamera(r: Row): Camera {
     onvif_host: null,
     anpr_enabled: anpr,
     record_enabled: anpr,
+    location_confidence: null,
+    metadata: null,
     last_seen_at: live ? minutesAgo(id === 5 ? 3 : 1) : id === 30 ? minutesAgo(35) : hoursAgo(26 + id),
     last_status_change_at: live ? hoursAgo(5) : id === 30 ? minutesAgo(35) : hoursAgo(26 + id),
     maintenance_status: maintenance,
@@ -696,6 +699,20 @@ export const settings: SettingItem[] = [
   setting('catalogue.timeout_s', 30),
   setting('catalogue.field_map', FIELD_MAP),
   setting('catalogue.department_aliases', ALIASES),
+  setting('catalogue.source', 'mock'),
+  setting('catalogue.portal_url', 'https://cctv.corp8.cloud'),
+  setting('catalogue.portal_email', ''),
+  setting('catalogue.portal_password', '', true),
+  setting('catalogue.enrichment_path', '/app/media/cameras_enrichment.csv'),
+  setting('catalogue.cameras_json_path', '/app/media/cameras.json'),
+  setting('sandbox.stream_host', '103.250.160.189'),
+  setting('sandbox.rtsp_port', 8554),
+  setting('sandbox.whep_port', 8889),
+  setting('sandbox.hls_base', 'https://cctv.corp8.cloud'),
+  setting('sandbox.stream_email', ''),
+  setting('sandbox.stream_password', '', true),
+  setting('sandbox.probe_timeout_s', 12),
+  setting('sandbox.probe_parallel', 6),
   setting('retention.days_frames', 7),
   setting('retention.days_reads', 30),
   setting('retention.days_clips', 90),
@@ -965,8 +982,9 @@ export function healthSummary(): HealthSummary {
   const count = (s: CameraStatus) => cameras.filter((c) => c.status === s).length;
   return {
     checked_at: minutesAgo(0.4),
-    cameras: { total: cameras.length, online: count('online'), degraded: count('degraded'), offline: count('offline'), unknown: count('unknown'), retired: count('retired') },
-    uptime_24h_pct: 18.9,
+    cameras: { total: cameras.length, online: count('online'), degraded: count('degraded'), offline: count('offline'), not_streaming: count('not_streaming'), unknown: count('unknown'), retired: count('retired') },
+    uptime_24h_pct: 97.4,
+    not_streaming: cameras.filter((c) => c.status === 'not_streaming').map((c) => ({ id: c.id, name: c.name, district: c.district, since: c.last_status_change_at })),
     anpr_live_cameras: liveCams.length,
     down_over_5min: cameras.filter((c) => c.status === 'offline' && c.live !== false).map((c) => ({ id: c.id, name: c.name, district: c.district, department_name: c.department_name, offline_since: c.last_status_change_at as string, minutes: Math.round((NOW - Date.parse(c.last_status_change_at as string)) / 60_000) })),
     amc_expiring_30d: cameras.filter((c) => c.amc_status === 'expiring').map((c) => ({ id: c.id, name: c.name, amc_vendor: c.amc_vendor, amc_expiry: c.amc_expiry as string, days_left: Math.round((Date.parse(c.amc_expiry as string) - NOW) / 86_400_000) })),
@@ -974,8 +992,8 @@ export function healthSummary(): HealthSummary {
     disk: { data_used_bytes: 12_345_678_901, data_free_bytes: 398_765_432_100, recordings_used_bytes: 45_678_901_234 },
     mediamtx: { ok: true, paths: 70, ready: 10 },
     anpr_workers: [
-      { id: 'live-a1b2c3', mode: 'live', gpu: false, cameras: 8, fps_total: 38.4, last_heartbeat_at: minutesAgo(0.1), stale: false },
-      { id: 'preindex-d4e5f6', mode: 'preindex', gpu: false, cameras: 42, fps_total: 41.0, last_heartbeat_at: minutesAgo(0.2), stale: false },
+      { id: 'live-a1b2c3', mode: 'live', gpu: false, version: '1.0.0-phase1', detector: 'contour', cameras: 8, fps_total: 38.4, last_heartbeat_at: minutesAgo(0.1), stale: false },
+      { id: 'preindex-d4e5f6', mode: 'preindex', gpu: false, version: '1.0.0-phase1', detector: 'auto', cameras: 42, fps_total: 41.0, last_heartbeat_at: minutesAgo(0.2), stale: false },
     ],
   };
 }

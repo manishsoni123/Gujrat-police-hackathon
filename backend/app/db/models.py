@@ -39,8 +39,13 @@ CAMERA_TYPES = ("analog", "ip", "ptz", "dome", "bullet", "anpr", "other")
 OWNERSHIPS = ("govt_dept", "private", "public_facing")
 CONNECTIVITY = ("lan", "fibre", "4g", "5g", "leased_line", "wifi", "other")
 CODECS = ("H264", "H265", "MJPEG", "UNKNOWN")
-CAMERA_STATUSES = ("unknown", "online", "degraded", "offline", "retired")
+# : the camera has never delivered a stream (catalogue live=false or a source that never came up);
+# it is not an outage, so no camera_offline alert/event is raised (CONTRACT Amendments 2026-09-05, §5.6).
+CAMERA_STATUSES = ("unknown", "online", "degraded", "offline", "not_streaming", "retired")
 MAINTENANCE = ("ok", "under_maintenance", "faulty", "decommissioned")
+# How sure we are about a camera's coordinates (organiser sandbox rows are team-inferred from the name alone):
+# exact = landmark found (~100 m), approx = area/junction (~1 km), guess = district HQ fallback or best candidate.
+LOCATION_CONFIDENCE = ("exact", "approx", "guess")
 HEALTH_SOURCES = ("mediamtx", "probe", "catalogue", "manual")
 ENTITY_TYPES = ("vehicle", "person")
 REASONS = ("stolen", "wanted", "blacklisted", "missing", "suspect", "arrested", "unidentified_body", "other")
@@ -102,6 +107,8 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     wall_layout: Mapped[dict | None] = mapped_column(JSONB)
+    # Tokens issued (iat) before this instant are rejected: set on password reset/change and deactivation.
+    token_not_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
@@ -136,6 +143,7 @@ class Camera(Base):
             "connectivity_type IS NULL OR connectivity_type IN ('lan','fibre','4g','5g','leased_line','wifi','other')",
             name="ck_cameras_conn",
         ),
+        CheckConstraint("location_confidence IS NULL OR location_confidence IN ('exact','approx','guess')", name="ck_cameras_loc_conf"),
         Index("ix_cameras_department", "department_id"),
         Index("ix_cameras_district", "district"),
         Index("ix_cameras_status", "status"),
@@ -186,6 +194,11 @@ class Camera(Base):
     maintenance_note: Mapped[str | None] = mapped_column(String(255))
     amc_vendor: Mapped[str | None] = mapped_column(String(120))
     amc_expiry: Mapped[date | None] = mapped_column(Date)
+    # Organiser-sandbox enrichment (CONTRACT Amendments 2026-09-05): confidence of the inferred coordinates and a
+    # JSONB bag (`metadata` column; attribute `meta` because SQLAlchemy reserves `metadata`) with the enrichment
+    # source/notes, the last import-time probe and the catalogue mode. Null for CSV/API/manual cameras.
+    location_confidence: Mapped[str | None] = mapped_column(String(8))
+    meta: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
     created_via: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
@@ -369,6 +382,11 @@ class Event(Base):
     __table_args__ = (
         Index("ix_events_camera_occurred", "camera_id", text("occurred_at DESC")),
         Index("ix_events_type_occurred", "type", text("occurred_at DESC")),
+        # Worker events are replay-safe (CONTRACT §7.2/§7.6): one loop_reset/intrusion per camera/instant/note.
+        Index(
+            "uq_events_worker_dedup", "camera_id", "type", "occurred_at", text("coalesce(note, '')"), unique=True,
+            postgresql_where=text("is_auto AND type IN ('loop_reset', 'intrusion')"),
+        ),
         _check("type", EVENT_TYPES, "ck_events_type"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -497,6 +515,8 @@ class AnprWorker(Base):
     detector: Mapped[str | None] = mapped_column(String(16))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Free-form heartbeat block (CONTRACT §7.5 ): detector requested/active/degraded/providers/weights, object weights.
+    extra: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class AuditLog(Base):
@@ -536,6 +556,55 @@ POST_CREATE_SQL = [
         DELETE FROM plate_reads a USING plate_reads b
           WHERE a.id > b.id AND a.camera_id = b.camera_id AND a.captured_at = b.captured_at AND a.plate_norm = b.plate_norm;
         CREATE UNIQUE INDEX uq_reads_camera_captured_plate ON plate_reads (camera_id, captured_at, plate_norm);
+      END IF;
+    END $$
+    """,
+    # Worker-event idempotency (see uq_events_worker_dedup): collapse duplicates left by earlier replays, then index.
+    """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'uq_events_worker_dedup') THEN
+        DELETE FROM events a USING events b
+          WHERE a.id > b.id AND a.camera_id = b.camera_id AND a.type = b.type AND a.occurred_at = b.occurred_at
+            AND coalesce(a.note, '') = coalesce(b.note, '') AND a.is_auto AND b.is_auto AND a.type IN ('loop_reset', 'intrusion');
+        CREATE UNIQUE INDEX uq_events_worker_dedup ON events (camera_id, type, occurred_at, coalesce(note, ''))
+          WHERE is_auto AND type IN ('loop_reset', 'intrusion');
+      END IF;
+    END $$
+    """,
+    # Additive columns for databases created before these fields existed (create_all never alters tables).
+    "ALTER TABLE anpr_workers ADD COLUMN IF NOT EXISTS extra JSONB",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_not_before TIMESTAMPTZ",
+    # Organiser-sandbox enrichment columns (CONTRACT Amendments 2026-09-05, real sandbox adapter).
+    "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS location_confidence VARCHAR(8)",
+    "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS metadata JSONB",
+    """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_cameras_loc_conf') THEN
+        ALTER TABLE cameras ADD CONSTRAINT ck_cameras_loc_conf CHECK (location_confidence IS NULL OR location_confidence IN ('exact','approx','guess'));
+      END IF;
+    END $$
+    """,
+    # cameras.status gains 'not_streaming' (never-online cameras, CONTRACT Amendments 2026-09-05 §5.6). Existing
+    # offline-but-never-seen rows are migrated once and their auto-raised camera_offline alerts closed
+    # (outcome 'other', note 'catalogue reports not live'); the count is written to the audit log.
+    "ALTER TABLE cameras DROP CONSTRAINT IF EXISTS ck_cameras_status",
+    "ALTER TABLE cameras ADD CONSTRAINT ck_cameras_status CHECK (status IN ('unknown','online','degraded','offline','not_streaming','retired'))",
+    """
+    DO $$
+    DECLARE n integer;
+    BEGIN
+      UPDATE alerts a SET status = 'closed', outcome = 'other', note = 'catalogue reports not live',
+        acknowledged_at = coalesce(a.acknowledged_at, now()), closed_at = now(), closed_by = NULL, updated_at = now()
+        FROM cameras c
+        WHERE a.camera_id = c.id AND a.type = 'camera_offline' AND a.status IN ('new', 'acknowledged')
+          AND c.status = 'offline' AND c.last_seen_at IS NULL;
+      GET DIAGNOSTICS n = ROW_COUNT;
+      UPDATE cameras SET status = 'not_streaming' WHERE status = 'offline' AND last_seen_at IS NULL;
+      IF n > 0 THEN
+        INSERT INTO audit_log (ts, actor, role, action, entity, after)
+          VALUES (now(), 'system', 'system', 'alert.auto_close', 'alert', jsonb_build_object('closed', n, 'note', 'catalogue reports not live'));
       END IF;
     END $$
     """,

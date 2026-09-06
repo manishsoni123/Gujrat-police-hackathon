@@ -552,6 +552,20 @@ on('GET', '/evidence/verify', (_m, url) => {
   const h = report?.sha256 ?? D.sha(path);
   return { body: { path, exists: true, entity: report ? 'report_file' : path.startsWith('crops') ? 'plate_read' : 'clip', entity_id: report?.id ?? 9876, stored_sha256: h, computed_sha256: h, match: true, size_bytes: report?.size_bytes ?? 18_234, checked_at: D.iso(Date.now()) } };
 });
+on('GET', '/external/sarthi/([^/]+)', (m) => {
+  const dl = decodeURIComponent(m[1]).replace(/[\s-]/g, '').toUpperCase();
+  let h = 0;
+  for (let i = 0; i < dl.length; i += 1) h = (h * 31 + dl.charCodeAt(i)) >>> 0;
+  const found = h % 5 !== 1;
+  const g = () => ((h = (h * 1103515245 + 12345) >>> 0) % 1000) / 1000;
+  const holders = ['Vijay Rathod', 'Meena Patel', 'Arjun Desai', 'Kiran Solanki', 'Rahul Joshi'];
+  const note = 'Mock data – integration-ready adapter; real SARTHI access requires NIC gateway credentials';
+  return {
+    body: found
+      ? { source: 'SARTHI (mock adapter)', adapter: 'sarthi_mock', dl_number: dl, found: true, holder_name: holders[Math.floor(g() * 5)], dob: '1995-03-15', valid_from: '2009-05-21', valid_till: '2029-05-16', classes: g() > 0.5 ? ['LMV', 'MCWG'] : ['LMV'], rto: `${dl.slice(0, 2)}-${dl.slice(2, 4)} RTO`, status: g() > 0.8 ? 'suspended' : 'active', note }
+      : { source: 'SARTHI (mock adapter)', adapter: 'sarthi_mock', dl_number: dl, found: false, note },
+  };
+});
 on('GET', '/external/vahan/([^/]+)', (m) => {
   const plate = normalisePlate(decodeURIComponent(m[1])).plate_norm;
   const g = D.mulberry32(plate.split('').reduce((s, c) => s + c.charCodeAt(0), 0));
@@ -610,12 +624,36 @@ on('PUT', '/settings', (_m, _u, init) => {
 });
 on('POST', '/settings/catalogue/test', async (_m, _u, init) => {
   await wait(500);
-  const b = body<{ base_url?: string }>(init);
+  const b = body<{ base_url?: string; source?: string; camera_id?: string }>(init);
+  if (b.source === 'sentinel_portal') {
+    const cam = b.camera_id || 'cam01';
+    return { body: { ok: true, source: 'sentinel_portal', stream: { host: '103.250.160.189', rtsp_port: 8554, whep_port: 8889, email: 'team@example.in', configured: true }, probe: { external_id: cam, ok: true, codec: 'H264', resolution: '1920x1080', fps: 25, profile: 'Main', duration_ms: 4180, error: null, summary: `${cam}: H.264 1920x1080 @ 25 fps` }, catalogue: { mode: 'file', ok: true, count: 30, source: '/app/media/cameras.json', error: null, notes: [] }, enrichment_path: '/app/media/cameras_enrichment.csv', portal_configured: false, duration_ms: 4200, error: null } };
+  }
   const base = b.base_url ?? (D.settings.find((s) => s.key === 'catalogue.base_url')?.value as string);
   if (base && !base.includes('mock-sandbox')) return { body: { ok: false, error: `GET ${base}/api/ingest: connection refused` } };
   return { body: { ok: true, status: 200, count: 50, sample: { id: 1, name: 'Sachivalaya Gate 1', department: 'Police', district: 'Gandhinagar', type: 'bullet', location: { lat: 23.2236, lon: 72.648, address: 'Sachivalaya, Sector 10, Gandhinagar' }, codec: 'H264', resolution: '1280x720', fps: 10, live: true, rtsp_url: 'rtsp://mediamtx:8554/stream/1', whep_url: 'http://mediamtx:8889/stream/1/whep', hls_url: 'http://mediamtx:8888/stream/1/index.m3u8', stream_properties: { bitrate_kbps: 1200 } }, mapped_sample: { external_id: '1', name: 'Sachivalaya Gate 1', department_code: 'POLICE', district: 'Gandhinagar', lat: 23.2236, lon: 72.648, address: 'Sachivalaya, Sector 10, Gandhinagar', type: 'bullet', codec: 'H264', resolution: '1280x720', fps: 10, live: true, rtsp_url: 'rtsp://mediamtx:8554/stream/1' }, unmapped_fields: ['stream_properties.bitrate_kbps'], duration_ms: 118 } };
 });
-on('GET', '/settings/public', () => ({ body: { mock_sandbox: true, 'ui.product_name': 'Sentinel Gujarat', 'ui.map_center': [23.2156, 72.6369], 'ui.map_zoom': 8, 'route.speed_flag_kmh': 150, 'route.default_window_h': 24, 'gap.coverage_radius_m': 150, 'gap.poi_radius_m': 300, 'gap.grid_m': 500, 'gap.ageing_years': 5, 'alerts.escalate_minutes': 5 } }));
+on('GET', '/settings/public', () => {
+  const src = String(D.settings.find((s) => s.key === 'catalogue.source')?.value ?? 'mock');
+  const labels: Record<string, string> = { mock: 'Built-in mock sandbox (50 synthetic cameras)', generic_json: 'Generic /api/ingest catalogue host', sentinel_portal: 'Organiser Sentinel sandbox (cctv.corp8.cloud, 30 real cameras)' };
+  return { body: { mock_sandbox: src === 'mock', mock_sandbox_served: true, catalogue_source: src, catalogue_source_label: labels[src] ?? labels.mock, sandbox_stream_host: src === 'sentinel_portal' ? '103.250.160.189' : null, 'catalogue.source': src, 'ui.product_name': 'Sentinel Gujarat', 'ui.map_center': [23.2156, 72.6369], 'ui.map_zoom': 8, 'route.speed_flag_kmh': 150, 'route.default_window_h': 24, 'gap.coverage_radius_m': 150, 'gap.poi_radius_m': 300, 'gap.grid_m': 500, 'gap.ageing_years': 5, 'alerts.escalate_minutes': 5 } };
+});
+on('POST', '/settings/catalogue/enrichment', async () => {
+  await wait(300);
+  return { body: { path: '/data/catalogue/cameras_enrichment.csv', rows: 30, confidence: { exact: 7, approx: 16, guess: 7 }, warnings: [], unknown_columns: [], with_coordinates: 30, departments: ['EDUCATION', 'GSRTC', 'MUNICIPAL', 'PANCHAYAT', 'POLICE', 'RTO'] } };
+});
+on('POST', '/cameras/import/sandbox/file', async (_m, _u, init) => {
+  if (currentUser.role !== 'admin') return err(403, 'forbidden', 'Insufficient role');
+  const fd = init.body instanceof FormData ? init.body : null;
+  const dry = fd?.get('dry_run') === 'true';
+  await wait(2500);
+  const probes = Array.from({ length: 30 }, (_x, i) => {
+    const ext = `cam${String(i + 1).padStart(2, '0')}`;
+    const h265 = [6, 12, 17, 18, 22, 26].includes(i + 1);
+    return { external_id: ext, name: `${String(i + 1).padStart(2, '0')} Sandbox camera ${i + 1}`, ok: true, codec: h265 ? 'H265' : 'H264', resolution: i % 4 === 1 ? '1280x720' : '1920x1080', fps: i % 4 === 1 ? 25 : null, live: true, duration_ms: 4000 + i * 300, error: null, location_confidence: (i % 5 === 0 ? 'guess' : i % 3 === 0 ? 'exact' : 'approx') as 'exact' | 'approx' | 'guess', department_code: i % 4 === 0 ? 'GSRTC' : 'POLICE', transcode: h265 };
+  });
+  return { body: { source: 'sentinel_portal', catalogue_mode: fd?.get('cameras_json') ? 'upload' : 'file', source_url: fd?.get('cameras_json') ? 'uploaded cameras.json' : '/app/media/cameras.json', enrichment_source: '/app/media/cameras_enrichment.csv', enrichment_rows: 30, enrichment_confidence: { exact: 7, approx: 16, guess: 7 }, missing_enrichment: [], started_at: D.iso(D.NOW_MS - 41_000), finished_at: D.iso(D.NOW_MS), duration_ms: 41_000, fetched: 30, added: dry ? 0 : 0, updated: dry ? 0 : 30, unchanged: 0, errors: [], warnings: [{ row: 0, external_id: undefined, field: 'catalogue', message: 'portal password not configured (Settings → Catalogue); using the last uploaded / server-side cameras.json' }], relay_paths_created: dry ? 0 : 36, relay_paths_failed: 0, anpr_enabled: 0, first_stream_ready_ms: dry ? null : 3120, probed: 30, probe_ok: 30, probe_h265: 6, probe_ms: 38_000, probes, unmapped_fields: [], dry_run: dry } };
+});
 on('GET', '/webhooks', () => ({ body: { items: D.webhooks } }));
 on('POST', '/webhooks', (_m, _u, init) => {
   const b = body<{ name: string; url: string; secret?: string; event_types: string[]; is_active?: boolean }>(init);
@@ -787,7 +825,7 @@ class MockSocket {
       stats();
       this.timers.push(setInterval(stats, 10_000));
     } else if (this.path === '/ws/health') {
-      const stats = () => this.emit('stats', { cameras: { total: D.cameras.length, online: D.cameras.filter((c) => c.status === 'online').length, degraded: D.cameras.filter((c) => c.status === 'degraded').length, offline: D.cameras.filter((c) => c.status === 'offline').length, unknown: D.cameras.filter((c) => c.status === 'unknown').length }, uptime_24h_pct: 18.9, anpr_live_cameras: 9, reads_last_min: 38 + Math.round(Math.random() * 10), disk_free_bytes: 398_765_432_100 });
+      const stats = () => this.emit('stats', { cameras: { total: D.cameras.length, online: D.cameras.filter((c) => c.status === 'online').length, degraded: D.cameras.filter((c) => c.status === 'degraded').length, offline: D.cameras.filter((c) => c.status === 'offline').length, not_streaming: D.cameras.filter((c) => c.status === 'not_streaming').length, unknown: D.cameras.filter((c) => c.status === 'unknown').length }, uptime_24h_pct: 97.4, anpr_live_cameras: 9, reads_last_min: 38 + Math.round(Math.random() * 10), disk_free_bytes: 398_765_432_100 });
       stats();
       this.timers.push(setInterval(stats, 10_000));
     } else if (this.path.startsWith('/ws/reads/')) {
@@ -803,7 +841,10 @@ class MockSocket {
         if (!pool.length) return;
         const d = pool[i % pool.length];
         i += 1;
-        this.emit('read', { ...d, id: 20_000 + i, captured_at: D.iso(Date.now() - 700), alert_id: null, watchlist_hit: D.watchlist.some((w) => w.is_effective && w.plate_norm === d.plate_norm) });
+        // Live reads are registered like any persisted read so GET /detections/{id} (the drawer) resolves them.
+        const read = { ...d, id: 20_000 + i, captured_at: D.iso(Date.now() - 700), alert_id: null, watchlist_hit: D.watchlist.some((w) => w.is_effective && w.plate_norm === d.plate_norm) };
+        D.detectionById.set(read.id, read);
+        this.emit('read', read);
       };
       this.timers.push(setInterval(tick, 3500));
       this.timers.push(setInterval(() => this.emit('object_counts', { camera_id: cameraId, minute: D.iso(Math.floor(Date.now() / 60_000) * 60_000), counts: { car: 2 + Math.round(Math.random() * 5), person: Math.round(Math.random() * 3), motorcycle: Math.round(Math.random() * 4), bus: 0, truck: Math.round(Math.random()), bicycle: 0 }, final: false }), 5000));

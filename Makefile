@@ -10,7 +10,7 @@
 #   make logs       follow logs (S=api to select one service)
 #   make test       backend pytest + frontend typecheck/build
 #   make screenshots  capture every page as PNG into docs/screenshots (needs a running stack)
-#   make down / restart / ps / config / gpu-config / reset-db / backup / psql / shell-api
+#   make down / restart / ps / config / gpu-config / reset-db / backup / rotate-db-password / psql / shell-api
 #
 # GPU VM: when deploy/.env says COMPOSE_PROFILES=gpu (written by deploy.sh --gpu)
 # every target automatically adds deploy/docker-compose.gpu.yml, exactly like
@@ -35,7 +35,7 @@ PLAYWRIGHT_IMAGE ?= mcr.microsoft.com/playwright:v$(PLAYWRIGHT_VERSION)-jammy
 WAIT_TIMEOUT ?= 600
 
 .PHONY: help env config gpu-config up down restart ps logs seed synthetic test test-backend test-frontend \
-        screenshots reset-db backup psql shell-api pull clean
+        screenshots deliverables reset-db backup rotate-db-password psql shell-api pull clean
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -102,11 +102,20 @@ reset-db: env ## drop the database volume and re-seed
 backup: env ## pg_dump into backups/
 	bash deploy/backup.sh
 
-psql: env ## open psql in the postgres container
-	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-sentinel} -d $${POSTGRES_DB:-sentinel}
+rotate-db-password: env ## new random POSTGRES_PASSWORD: ALTER USER + deploy/.env + api restart
+	bash deploy/rotate-db-password.sh --generate
+
+psql: env ## open psql in the postgres container (user/db from the container environment = deploy/.env)
+	$(COMPOSE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
 shell-api: env ## shell inside the api container
 	$(COMPOSE) exec api bash
 
 clean: down ## stop and delete every volume (database, data, recordings, certificates)
 	$(COMPOSE) down --volumes --remove-orphans
+
+deliverables: ## build the PDFs (HLD, Scale Plan, REGISTRY-API, LICENCES, PHASE2-RUNBOOK, CONTRACT) + the presentation into docs/export (Node 24, no Docker)
+	cd docs/tools && npm i --no-save --no-package-lock --no-audit --no-fund
+	node docs/tools/export-pdf.mjs
+	node docs/tools/build-presentation.mjs
+	@ls -la docs/export

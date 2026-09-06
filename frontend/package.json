@@ -3,7 +3,7 @@
   "version": "1.0.0-phase1",
   "private": true,
   "description": "Sentinel Gujarat - unified CCTV registry, viewing and analytics for Gujarat Police (frontend)",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",

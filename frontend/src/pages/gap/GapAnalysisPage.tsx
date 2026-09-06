@@ -7,6 +7,7 @@ import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import L from 'leaflet';
 import { GeoJSON } from '@/components/leaflet';
 import { PageHeader } from '@/components/PageHeader';
+import { rowProps } from '@/hooks/useListQuery';
 import { KpiTile } from '@/components/KpiTile';
 import { gapApi, geoApi } from '@/api';
 import type { GapAnalysis, GeoFeatureCollection } from '@/api/types';
@@ -277,7 +278,7 @@ export function GapAnalysisPage() {
                   rowKey="camera_id"
                   pagination={{ pageSize: 15, size: 'small' }}
                   dataSource={g.metadata_gaps}
-                  onRow={(r) => ({ onClick: () => navigate(`/cameras?open=${r.camera_id}`), style: { cursor: 'pointer' } })}
+                  onRow={(r) => rowProps(() => navigate(`/cameras?open=${r.camera_id}`))}
                   columns={[
                     { title: 'Camera', dataIndex: 'name', render: (v: string, r) => <span><strong>{v}</strong> <span style={{ color: '#9CA3AF' }}>#{r.camera_id}</span></span> },
                     { title: 'Missing fields', dataIndex: 'missing', render: (m: string[]) => <Space size={4} wrap>{m.map((f) => <Tag key={f} color="purple" style={{ margin: 0 }}>{f}</Tag>)}</Space> },
@@ -297,7 +298,7 @@ export function GapAnalysisPage() {
                   pagination={{ pageSize: 15, size: 'small' }}
                   dataSource={g.ageing}
                   scroll={{ x: 1100 }}
-                  onRow={(r) => ({ onClick: () => navigate(`/cameras?open=${r.camera_id}`), style: { cursor: 'pointer' } })}
+                  onRow={(r) => rowProps(() => navigate(`/cameras?open=${r.camera_id}`))}
                   columns={[
                     { title: 'Priority', dataIndex: 'priority_score', width: 100, align: 'right', fixed: 'left', render: (v: number) => <span style={{ fontWeight: 600, color: v >= 60 ? '#DC2626' : v >= 30 ? '#D97706' : '#4B5563' }}>{v.toFixed(0)}</span> },
                     { title: 'Camera', dataIndex: 'name', width: 240, ellipsis: true, render: (v: string) => <strong>{v}</strong> },

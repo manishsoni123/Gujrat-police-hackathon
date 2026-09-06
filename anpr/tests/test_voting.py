@@ -92,3 +92,62 @@ def test_only_best_member_keeps_its_frame():
     assert a.frame is None and b.frame is not None
     read = v.flush(1)[0]
     assert read.frame is b.frame
+
+
+# ---- plate_raw must agree with the voted plate_norm (CONTRACT section 7.2 re-normalises plate_raw) ----
+
+def test_plate_raw_follows_the_vote_not_the_best_member():
+    """The highest-confidence member is the mis-read; the vote corrects it and plate_raw must follow."""
+    v = Voter(window_s=3.0)
+    v.add(cand(1, "GJ 01 AB 1234", 0.70, 0.0))
+    v.add(cand(1, "GJ 01 AB 1284", 0.95, 0.3))   # best confidence, wrong digit (the live-DB case: read 4193)
+    v.add(cand(1, "GJ 01 AB 1234", 0.80, 0.6))
+    v.add(cand(1, "GJ-01-AB-1234", 0.75, 0.9))
+    r = v.expire(T0 + timedelta(seconds=3.0))[0]
+    assert r.plate_norm == "GJ01AB1234"
+    assert r.plate_raw == "GJ 01 AB 1234"                    # the 0.80 member, not the 0.95 mis-read
+    assert normalise(r.plate_raw).plate_norm == r.plate_norm
+    assert r.captured_at == T0 + timedelta(seconds=0.3)      # bbox/crop/frame/time still from the best member
+    assert r.votes == 4
+
+
+def test_plate_raw_invariant_holds_for_every_emitted_read():
+    v = Voter(window_s=3.0)
+    v.add(cand(2, "MH 02\nBZ 7788", 0.6, 0.0))
+    v.add(cand(2, "MH 02 BZ 7768", 0.9, 0.2))
+    v.add(cand(2, "MH02BZ7788", 0.7, 0.4))
+    v.add(cand(3, "22 BH 4321 AA", 0.5, 0.0))
+    v.add(cand(3, "22 BH 4321 AA", 0.6, 0.1))
+    v.add(cand(3, "2Z BH 4321 AA", 0.99, 0.2))
+    v.add(cand(4, "GJ01AB12345", 0.8, 0.0))                  # invalid format: plate_norm is the cleaned string
+    for r in v.flush():
+        assert normalise(r.plate_raw).plate_norm == r.plate_norm, (r.plate_raw, r.plate_norm)
+    v.add(cand(5, "GJ 05 RS 9012", 0.9, 0.0))
+    v.add(cand(5, "GJ 05 RS 9O12", 0.95, 0.1))               # O -> 0 substitution: same plate_norm, raw differs
+    r = v.flush(5)[0]
+    assert r.plate_norm == "GJ05RS9012" and r.plate_raw == "GJ 05 RS 9O12"   # agrees with the vote, so the best raw wins
+    assert normalise(r.plate_raw).plate_norm == r.plate_norm
+
+
+def test_raw_falls_back_to_display_form_when_no_member_agrees(monkeypatch):
+    """With max_distance 1 the majority string is always a member string; simulate a wider window."""
+    import anpr.voting as voting
+
+    monkeypatch.setattr(voting, "majority_string", lambda strings, weights=None: "GJ01AB1299")
+    v = Voter(window_s=3.0)
+    v.add(cand(1, "GJ 01 AB 1234", 0.9, 0.0))
+    v.add(cand(1, "GJ 01 AB 1284", 0.8, 0.2))
+    r = v.flush(1)[0]
+    assert r.plate_norm == "GJ01AB1299"
+    assert r.plate_raw == "GJ 01 AB 1299"
+    assert normalise(r.plate_raw).plate_norm == r.plate_norm
+
+
+def test_raw_for_vote_direct():
+    from anpr.voting import raw_for_vote
+
+    members = [cand(1, "gj-01-ab-1234", 0.4, 0.0), cand(1, "GJ 01 AB 1234", 0.6, 0.1), cand(1, "GJ 01 AB 1284", 0.9, 0.2)]
+    assert raw_for_vote("GJ01AB1234", members) == "GJ 01 AB 1234"
+    assert raw_for_vote("GJ01AB1284", members) == "GJ 01 AB 1284"
+    assert raw_for_vote("22BH4321AA", members) == "22 BH 4321 AA"
+    assert raw_for_vote("GJ01AB12345", []) == "GJ01AB12345"

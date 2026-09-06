@@ -12,6 +12,7 @@ import { BaseMap } from '@/components/MapView';
 import { GANDHINAGAR_CENTER } from '@/utils/geo';
 import { dayjs } from '@/utils/time';
 import { cameraTypeLabel } from '@/utils/format';
+import { maskUrlCredentials } from '@/utils/url';
 
 const pinIcon = L.divIcon({ className: '', html: '<div class="sg-route-marker" style="width:18px;height:18px;font-size:10px">●</div>', iconSize: [18, 18], iconAnchor: [9, 9] });
 
@@ -52,6 +53,7 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
     if (camera) {
       form.setFieldsValue({
         ...camera,
+        rtsp_url: camera.rtsp_url ? maskUrlCredentials(camera.rtsp_url) : camera.rtsp_url,
         department_code: camera.department_code,
         install_date: camera.install_date ? dayjs(camera.install_date) : null,
         amc_expiry: camera.amc_expiry ? dayjs(camera.amc_expiry) : null,

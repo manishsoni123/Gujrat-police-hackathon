@@ -65,9 +65,15 @@ body {
 .sg-grid-6 {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
+.sg-grid-7 {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
 @media (max-width: 1280px) {
   .sg-grid-6 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sg-grid-7 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .sg-grid-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -84,14 +90,17 @@ body {
 }
 
 /* sidebar */
+/* Compact navigation metrics: 16 items x 38 px + 5 captions x 22 px + logo (56) + collapse bar (49) = 823 px,
+   so every item is visible without scrolling on a 900 px laptop viewport and a maximised 1080p browser. */
 .sg-sider .ant-menu-item-group-title {
-  padding: 8px 20px 2px;
+  padding: 6px 20px 0;
+  line-height: 16px;
   font-size: 11px;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
-/* Short viewports (laptop 768-820 px): drop the group captions so all 16 items fit without scrolling. */
-@media (max-height: 820px) {
+/* Short viewports (768-860 px): drop the group captions so all 16 items still fit without scrolling. */
+@media (max-height: 860px) {
   .sg-sider .ant-menu-item-group-title {
     display: none;
   }
@@ -110,8 +119,12 @@ body {
 .sg-sider .ant-menu-inline-collapsed .ant-menu-item-group-title {
   display: none;
 }
-.sg-sider .ant-menu-item {
+.sg-sider .ant-menu.ant-menu-inline .ant-menu-item,
+.sg-sider .ant-menu.ant-menu-inline-collapsed .ant-menu-item {
+  height: 34px;
+  line-height: 34px;
   margin-inline: 8px;
+  margin-block: 2px;
   width: calc(100% - 16px);
   border-radius: 6px;
 }
@@ -164,6 +177,14 @@ body {
 .sg-table .ant-table-tbody > tr {
   cursor: pointer;
 }
+/* Rows that open a drawer are focusable (rowProps): keep the focus ring visible inside the table. */
+.ant-table-tbody > tr[role='button']:focus-visible {
+  outline: 2px solid #1e4db7;
+  outline-offset: -2px;
+}
+.ant-table-tbody > tr[role='button']:focus-visible > td {
+  background: #eef2ff;
+}
 .sg-table .ant-table-tbody > tr.sg-row-new > td {
   background: #fef2f2;
 }
@@ -213,6 +234,12 @@ body {
   background: rgba(11, 15, 25, 0.55);
   gap: 8px;
   font-size: 13px;
+}
+.sg-player-overlay-compact {
+  font-size: 12px;
+  background: rgba(11, 15, 25, 0.35);
+  justify-content: flex-end;
+  padding-bottom: 30px;
 }
 .sg-player-caption {
   position: absolute;
@@ -334,6 +361,19 @@ body {
   border-radius: 50%;
   border: 2px dashed var(--maint, transparent);
 }
+/* team-inferred coordinates (organiser sandbox): approx = dashed ring, guess = hollow marker */
+.sg-marker-approx::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px dashed rgba(17, 24, 39, 0.55);
+}
+.sg-marker-guess {
+  border-width: 2px;
+  border-style: solid;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15), inset 0 0 0 1px #fff;
+}
 .sg-marker-anpr::before {
   content: 'A';
   position: absolute;
@@ -375,6 +415,26 @@ body {
 }
 .sg-route-marker-fuzzy {
   background: #d97706;
+}
+/* Repeat-stop badge on a per-camera route marker. */
+.sg-route-marker-count {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #0b1f3a;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  border: 1px solid #fff;
+}
+.sg-route-marker {
+  position: relative;
 }
 /* Cluster icons are built by MapView.clusterIcon (neutral fill, worst-status ring, count text + breakdown title).
    The scoped rules below also override leaflet.markercluster's green/yellow defaults should the library icon ever render. */

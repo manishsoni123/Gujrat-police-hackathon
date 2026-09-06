@@ -8,9 +8,12 @@ import type {
   AmcStatus,
   CameraStatus,
   ConfidenceLevel,
+  LocationConfidence,
   MaintenanceStatus,
   WatchlistReason,
 } from '@/theme/colours';
+
+export type { LocationConfidence };
 
 export type Role = 'admin' | 'dept_admin' | 'operator' | 'viewer';
 
@@ -91,6 +94,22 @@ export type Ownership = 'govt_dept' | 'private' | 'public_facing';
 export type Connectivity = 'lan' | 'fibre' | '4g' | '5g' | 'leased_line' | 'wifi' | 'other';
 export type Codec = 'H264' | 'H265' | 'MJPEG' | 'UNKNOWN';
 
+/** Organiser-sandbox enrichment / probe bag (`cameras.metadata`, CONTRACT Amendments 2026-09-05). */
+export interface CameraMetadata {
+  enrichment?: {
+    confidence?: LocationConfidence | null;
+    source?: string | null;
+    notes?: string | null;
+    city?: string | null;
+    type_guess?: string | null;
+    department_guess?: string | null;
+    name_matches_catalogue?: boolean | null;
+  } | null;
+  probe?: { at?: string; ok?: boolean; codec?: string | null; resolution?: string | null; fps?: number | null; profile?: string | null; b_frames?: number | null; duration_ms?: number | null; error?: string | null; kind?: string } | null;
+  catalogue?: { source?: string; mode?: string } | null;
+  [key: string]: unknown;
+}
+
 export interface CameraSummary {
   id: number;
   external_id: string;
@@ -149,6 +168,9 @@ export interface Camera extends CameraSummary {
   age_years: number | null;
   amc_status: AmcStatus;
   created_by_username: string | null;
+  /** How sure the coordinates are (organiser-sandbox rows are team-inferred); null for CSV/API/manual cameras. */
+  location_confidence?: LocationConfidence | null;
+  metadata?: CameraMetadata | null;
 }
 
 export interface CameraDetail extends Camera {
@@ -205,6 +227,23 @@ export interface ImportWarning {
   message: string;
 }
 
+/** One row of the organiser-sandbox import-time probe report (`probes[]`). */
+export interface SandboxProbeRow {
+  external_id: string;
+  name: string;
+  /** true = stream answered, false = refused/timed out, null = not probed */
+  ok: boolean | null;
+  codec: string | null;
+  resolution: string | null;
+  fps: number | null;
+  live: boolean | null;
+  duration_ms: number | null;
+  error: string | null;
+  location_confidence: LocationConfidence | null;
+  department_code: string | null;
+  transcode: boolean | null;
+}
+
 export interface SandboxImportResult {
   source_url: string;
   started_at: string;
@@ -221,6 +260,29 @@ export interface SandboxImportResult {
   anpr_enabled: number;
   first_stream_ready_ms: number | null;
   dry_run: boolean;
+  unmapped_fields?: string[];
+  /* organiser ("Sentinel") sandbox adapter only */
+  source?: 'sentinel_portal' | string;
+  catalogue_mode?: 'upload' | 'portal' | 'file' | string;
+  enrichment_source?: string | null;
+  enrichment_rows?: number;
+  enrichment_confidence?: Record<LocationConfidence, number> | null;
+  missing_enrichment?: string[];
+  probed?: number;
+  probe_ok?: number;
+  probe_h265?: number;
+  probe_ms?: number;
+  probes?: SandboxProbeRow[];
+}
+
+export interface EnrichmentUploadResult {
+  path: string;
+  rows: number;
+  confidence: Record<LocationConfidence, number>;
+  warnings: string[];
+  unknown_columns: string[];
+  with_coordinates: number;
+  departments: string[];
 }
 
 export interface CsvImportResult {
@@ -296,6 +358,7 @@ export interface GeoCameraProps {
   heading_deg: number | null;
   fov_deg: number | null;
   last_seen_at: string | null;
+  location_confidence?: LocationConfidence | null;
 }
 export interface GeoDistrictProps {
   id: number;
@@ -332,6 +395,11 @@ export interface StreamInfo {
   snapshot_stale: boolean;
   ready: boolean | null;
   readers: number | null;
+  /** False when the relay cannot serve this stream over WebRTC (B-frame H.264); the player then starts with HLS. */
+  whep_supported?: boolean;
+  preferred_mode?: 'whep' | 'hls';
+  /** True when the play path is the relay's libx264 re-encode (H.265 source, or H.264 with B-frames). */
+  transcoded?: boolean;
   record_enabled: boolean;
   playback_path: string;
   status: CameraStatus;
@@ -343,6 +411,9 @@ export interface AnprWorker {
   id: string;
   mode: 'live' | 'preindex';
   gpu: boolean;
+  version?: string;
+  /** Active plate detector reported in the heartbeat: `onnx`, `contour` (fallback) or `auto` (CONTRACT §7.7). */
+  detector?: string | null;
   cameras: number;
   fps_total: number;
   last_heartbeat_at: string;
@@ -351,9 +422,11 @@ export interface AnprWorker {
 
 export interface HealthSummary {
   checked_at: string;
-  cameras: { total: number; online: number; degraded: number; offline: number; unknown: number; retired: number };
+  cameras: { total: number; online: number; degraded: number; offline: number; not_streaming?: number; unknown: number; retired: number };
   uptime_24h_pct: number | null;
   anpr_live_cameras: number;
+  /** Never-online cameras (catalogue live=false or a source that never answered); never in `down_over_5min`. */
+  not_streaming?: { id: number; name: string; district: string | null; since: string | null }[];
   down_over_5min: { id: number; name: string; district: string | null; department_name: string; offline_since: string; minutes: number }[];
   amc_expiring_30d: { id: number; name: string; amc_vendor: string | null; amc_expiry: string; days_left: number }[];
   maintenance: { id: number; name: string; maintenance_status: MaintenanceStatus; since: string | null }[];
@@ -710,7 +783,7 @@ export interface EventInput {
 
 export interface DashboardStats {
   generated_at: string;
-  cameras: { total: number; online: number; degraded: number; offline: number; unknown: number; anpr_live: number; recording: number };
+  cameras: { total: number; online: number; degraded: number; offline: number; not_streaming?: number; unknown: number; anpr_live: number; recording: number };
   reads: { last_1h: number; last_24h: number; total: number; last_read_at: string | null };
   sightings: { last_24h: number; total: number; valid_format_pct_24h: number | null };
   alerts: { new: number; acknowledged: number; last_24h: number; critical_open: number; avg_latency_ms_24h: number | null };
@@ -854,6 +927,21 @@ export interface EvidenceVerify {
   checked_at: string;
 }
 
+export interface SarthiLookup {
+  source: string;
+  adapter: string;
+  dl_number: string;
+  found: boolean;
+  holder_name?: string;
+  dob?: string;
+  valid_from?: string;
+  valid_till?: string;
+  classes?: string[];
+  rto?: string;
+  status?: string;
+  note: string;
+}
+
 export interface VahanLookup {
   source: string;
   adapter: string;
@@ -883,20 +971,37 @@ export interface SettingItem {
   updated_at: string | null;
 }
 
+export type CatalogueSource = 'mock' | 'sentinel_portal' | 'generic_json';
+
 export interface CatalogueTestResult {
   ok: boolean;
+  source?: CatalogueSource | string;
   status?: number;
   count?: number;
   sample?: Record<string, unknown>;
   mapped_sample?: Record<string, unknown>;
+  mapping_error?: string | null;
   unmapped_fields?: string[];
   duration_ms?: number;
-  error?: string;
+  error?: string | null;
+  url?: string;
+  /* sentinel_portal: one-camera probe with the stored credentials (never echoes secrets) */
+  stream?: { host: string; rtsp_port: number; whep_port: number; email: string; configured: boolean };
+  probe?: { external_id: string; ok: boolean; codec: string | null; resolution: string | null; fps: number | null; profile: string | null; duration_ms: number | null; error: string | null; summary: string };
+  catalogue?: { mode: 'portal' | 'file' | string; ok: boolean; count: number | null; source: string | null; error: string | null; notes: string[]; fallback?: { ok: boolean; count: number; source: string } };
+  enrichment_path?: string | null;
+  portal_configured?: boolean;
 }
 
 export interface PublicSettings {
+  /** True only while the built-in mock is both served (MOCK_SANDBOX=1) and selected as the catalogue source. */
   mock_sandbox: boolean;
-  [key: string]: SettingValue;
+  mock_sandbox_served?: boolean;
+  catalogue_source?: CatalogueSource;
+  catalogue_source_label?: string;
+  /** Stream relay host of the organiser sandbox (only when catalogue_source = sentinel_portal). */
+  sandbox_stream_host?: string | null;
+  [key: string]: SettingValue | undefined;
 }
 
 export type WebhookEventType = 'alert.created' | 'alert.updated' | 'camera.offline' | 'camera.online' | 'event.created';
@@ -1016,7 +1121,7 @@ export interface WsAlertStats {
 }
 
 export interface WsHealthStats {
-  cameras: { total: number; online: number; degraded: number; offline: number; unknown: number };
+  cameras: { total: number; online: number; degraded: number; offline: number; not_streaming?: number; unknown: number };
   uptime_24h_pct: number | null;
   anpr_live_cameras: number;
   reads_last_min: number;

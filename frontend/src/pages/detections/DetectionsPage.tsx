@@ -6,10 +6,10 @@ import { Alert, Button, Card, Checkbox, Descriptions, Drawer, Input, Select, Sli
 import type { ColumnsType } from 'antd/es/table';
 import { PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined, TagOutlined, CarOutlined, CheckOutlined } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
-import { useListQuery } from '@/hooks/useListQuery';
+import { rowProps, useListQuery } from '@/hooks/useListQuery';
 import { detectionsApi, evidenceApi, reportsApi } from '@/api';
 import type { Detection, DetectionDetail, EvidenceVerify } from '@/api/types';
-import { StatusTag, DepartmentTag, EventTypeTag } from '@/components/Tags';
+import { StatusTag, DepartmentTag, EventTypeTag, WatchlistHitTag } from '@/components/Tags';
 import { IstTime } from '@/components/IstTime';
 import { PlateText } from '@/components/PlateText';
 import { ConfidenceBar, CropThumb, HashText } from '@/components/Misc';
@@ -73,7 +73,7 @@ function DetectionDrawer({ id, onClose }: { id: number | null; onClose: () => vo
   const cropPath = mediaRelativePath(d?.crop_url);
 
   return (
-    <Drawer open={id !== null} onClose={onClose} width={720} title={d ? <Space><span>Read #{d.id}</span><PlateText plate={d.plate_norm} raw={d.plate_raw} invalid={!d.is_valid_format} /> {d.watchlist_hit ? <Tag color="red" style={{ margin: 0 }}>watchlist hit</Tag> : null}</Space> : 'Plate read'} loading={q.isLoading}>
+    <Drawer open={id !== null} onClose={onClose} width={720} title={d ? <Space><span>Read #{d.id}</span><PlateText plate={d.plate_norm} raw={d.plate_raw} invalid={!d.is_valid_format} /> {d.watchlist_hit ? <WatchlistHitTag size="default" /> : null}</Space> : 'Plate read'} loading={q.isLoading}>
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : null}
       {d ? (
         <div style={{ display: 'grid', gap: 16 }}>
@@ -200,7 +200,7 @@ export function DetectionsPage() {
 
   const columns: ColumnsType<Detection> = [
     { title: 'Crop', dataIndex: 'crop_url', width: 116, render: (u: string | null, r) => <CropThumb src={u} alt={`Plate crop ${r.plate_display}`} sha256={r.crop_sha256} preview={false} /> },
-    { title: 'Plate', dataIndex: 'plate_norm', key: 'plate_norm', sorter: true, width: 190, render: (p: string, r) => <Space size={6}><PlateText plate={p} raw={r.plate_raw} invalid={!r.is_valid_format} />{r.watchlist_hit ? <Tag color="red" style={{ margin: 0 }}>hit</Tag> : null}</Space> },
+    { title: 'Plate', dataIndex: 'plate_norm', key: 'plate_norm', sorter: true, width: 190, render: (p: string, r) => <Space size={6}><PlateText plate={p} raw={r.plate_raw} invalid={!r.is_valid_format} />{r.watchlist_hit ? <WatchlistHitTag /> : null}</Space> },
     { title: 'Camera', dataIndex: ['camera', 'name'], key: 'camera_name', sorter: true, ellipsis: true, render: (v: string, r) => <span><strong>{v}</strong><div style={{ fontSize: 11, color: '#6B7280' }}>{fmtPlace(r.camera.district, r.camera.police_station)}</div></span> },
     { title: 'Department', dataIndex: ['camera', 'department_code'], width: 120, render: (v: string, r) => <DepartmentTag code={v} name={r.camera.department_name} size="small" /> },
     { title: 'Captured (IST)', dataIndex: 'captured_at', key: 'captured_at', sorter: true, width: 150, render: (v: string) => <IstTime value={v} /> },
@@ -217,7 +217,7 @@ export function DetectionsPage() {
     <div>
       <PageHeader
         title="Detections"
-        description={`Accepted (voted) plate reads with crop, confidence and IST time · ${list.total.toLocaleString('en-IN')} in the current window${hasFilters ? ' matching filters' : ''}. Click a row for the full frame, hashes and actions.`}
+        description={`Confirmed plate reads (the best of several frames of the same plate) with crop, confidence and IST time · ${list.total.toLocaleString('en-IN')} in the current window${hasFilters ? ' matching filters' : ''}. Click a row for the full frame, hashes and actions.`}
         extra={
           <Button icon={<ReloadOutlined />} loading={list.query.isFetching} onClick={() => void list.query.refetch()}>
             Refresh
@@ -283,7 +283,7 @@ export function DetectionsPage() {
             sticky
             scroll={{ x: 1200 }}
             rowClassName={(r) => (r.watchlist_hit ? 'sg-row-new' : '')}
-            onRow={(r) => ({ onClick: () => setOpenId(r.id) })}
+            onRow={(r) => rowProps(() => setOpenId(r.id))}
           />
         )}
       </Card>

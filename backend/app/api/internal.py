@@ -19,6 +19,7 @@ from app.core.tz import iso_z, parse_iso, utcnow
 from app.db.models import AnprWorker, Camera, Zone
 from app.schemas.internal import DetectionBatch, EventsBatch, Heartbeat, ObjectCountsBody
 from app.services import serializers
+from app.services.health_poller import worker_item
 from app.services.mediamtx_client import relay_path, relay_rtsp_url
 from app.services.sightings import create_worker_events, get_camera_for_ingest, ingest_batch, store_snapshot, upsert_object_counts
 from app.services.ws_manager import manager
@@ -142,20 +143,41 @@ async def object_counts(body: ObjectCountsBody, db: DbDep):
     return {"object_counts_upserted": n, "rejected": rejected}
 
 
+MAX_EXTRA_BYTES = 16 * 1024
+
+
 @router.post("/internal/heartbeat", status_code=204)
 async def heartbeat(body: Heartbeat, db: DbDep):
     now = utcnow()
     cameras = [c.model_dump() for c in body.cameras]
     started = parse_iso(body.started_at) if body.started_at else None
-    stmt = pg_insert(AnprWorker).values(id=body.worker_id[:64], mode=body.mode, version=body.version[:32], gpu=body.gpu, cameras=cameras, detector=(body.detector or None), started_at=started, last_heartbeat_at=now)
-    stmt = stmt.on_conflict_do_update(index_elements=[AnprWorker.id], set_={"mode": body.mode, "version": body.version[:32], "gpu": body.gpu, "cameras": cameras, "detector": body.detector or None, "started_at": started, "last_heartbeat_at": now})
+    extra = body.extra if isinstance(body.extra, dict) else None
+    if extra is not None and len(json.dumps(extra, default=str)) > MAX_EXTRA_BYTES:
+        raise validation_error("Invalid heartbeat", [{"field": "extra", "message": f"must serialise to at most {MAX_EXTRA_BYTES // 1024} KB"}])
+    values = {"mode": body.mode, "version": body.version[:32], "gpu": body.gpu, "cameras": cameras, "detector": body.detector or None, "started_at": started, "last_heartbeat_at": now, "extra": extra}
+    stmt = pg_insert(AnprWorker).values(id=body.worker_id[:64], **values)
+    stmt = stmt.on_conflict_do_update(index_elements=[AnprWorker.id], set_=values)
     await db.execute(stmt)
     await db.commit()
-    manager.broadcast(
-        "health", "anpr_status",
-        {"worker_id": body.worker_id, "mode": body.mode, "gpu": body.gpu, "detector": body.detector, "cameras": [{"id": c["id"], "state": c["state"], "fps_actual": c.get("fps_actual")} for c in cameras], "last_heartbeat_at": iso_z(now), "stale": False},
-        scoped=False,
-    )
+    # Scoped fan-out (CONTRACT §9): a dept_admin on /ws/health only sees the camera ids/states of its own scope.
+    cam_ids = [c["id"] for c in cameras]
+    dept_by_id: dict[int, tuple[int | None, str | None]] = {}
+    if cam_ids:
+        rows = (await db.execute(select(Camera.id, Camera.department_id, Camera.district).where(Camera.id.in_(cam_ids)))).all()
+        dept_by_id = {int(r[0]): (r[1], r[2]) for r in rows}
+    base = worker_item(body.worker_id, body.mode, body.gpu, body.version, body.detector, cameras, now, False, extra, started)
+
+    def payload(conn):
+        # §9 envelope shape kept (`worker_id`, `cameras` = list); `camera_count`, `extra`, `degraded` are additive.
+        visible = cameras if conn.scope.unrestricted else [c for c in cameras if conn.scope.allows(*dept_by_id.get(int(c["id"]), (None, None)))]
+        return {
+            **base, "worker_id": body.worker_id, "camera_count": len(visible),
+            "fps_total": round(sum(float(c.get("fps_actual") or 0) for c in visible), 1),
+            "cameras": [{"id": c["id"], "state": c["state"], "fps_actual": c.get("fps_actual")} for c in visible],
+            "camera_states": [{"id": c["id"], "state": c["state"], "fps_actual": c.get("fps_actual")} for c in visible],
+        }
+
+    manager.broadcast_scoped_fn("health", "anpr_status", payload)
     return Response(status_code=204)
 
 

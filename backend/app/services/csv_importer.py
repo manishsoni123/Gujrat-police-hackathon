@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -101,12 +102,32 @@ def parse_watchlist_csv(text: str) -> ParsedCsv:
     return parse_csv(text, WATCHLIST_TEMPLATE_HEADER, ("entity_type", "reason"))
 
 
+_FORMULA_LEADERS = ("=", "+", "-", "@", "\t", "\r")
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def neutralise_cell(v: Any) -> Any:
+    """Spreadsheet formula neutralisation for every CSV the API writes (CONTRACT §10.3 Amendments).
+
+    A string cell that starts with `=`, `+`, `-`, `@`, TAB or CR is prefixed with a single quote
+    so Excel/LibreOffice treat it as text (`=HYPERLINK(...)`, `=cmd|' /C calc'!A0` in a camera
+    name, a User-Agent or an uploaded line can never execute); C0 control characters are removed.
+    Non-strings (numbers, booleans, None) are returned unchanged.
+    """
+    if not isinstance(v, str):
+        return v
+    s = _CONTROL_RE.sub("", v)
+    if s.startswith(_FORMULA_LEADERS):
+        s = "'" + s
+    return s
+
+
 def render_csv(header: list[str], rows: list[list[Any]], trailer: str | None = None) -> str:
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(header)
     for r in rows:
-        w.writerow(["" if v is None else v for v in r])
+        w.writerow(["" if v is None else neutralise_cell(v) for v in r])
     if trailer:
         buf.write(trailer.rstrip("\n") + "\n")
     return buf.getvalue()

@@ -5,7 +5,7 @@ import { Button, Card, Input, Select, Space, Table, Tooltip, Switch } from 'antd
 import type { ColumnsType } from 'antd/es/table';
 import { CloudUploadOutlined, DownloadOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { PageHeader } from '@/components/PageHeader';
-import { useListQuery } from '@/hooks/useListQuery';
+import { rowProps, useListQuery } from '@/hooks/useListQuery';
 import { camerasApi } from '@/api';
 import type { Camera } from '@/api/types';
 import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, AmcTag } from '@/components/Tags';
@@ -17,9 +17,11 @@ import { CameraDrawer } from './CameraDrawer';
 import { CameraForm } from './CameraForm';
 import { ExportDialog } from '@/components/Dialogs';
 import { cameraTypeLabel, fmtPct } from '@/utils/format';
+import { CAMERA_STATUS, CATALOGUE_NOT_STREAMING, type CameraStatus } from '@/theme/colours';
 
 const TYPES = ['analog', 'ip', 'ptz', 'dome', 'bullet', 'anpr', 'other'];
-const STATUSES = ['online', 'degraded', 'offline', 'unknown', 'retired'];
+const STATUSES: CameraStatus[] = ['online', 'degraded', 'offline', 'not_streaming', 'unknown', 'retired'];
+const statusLabel = (s: string) => (s === 'not_streaming' ? CATALOGUE_NOT_STREAMING.label : CAMERA_STATUS[s as CameraStatus]?.label ?? s);
 
 export function CamerasPage() {
   const navigate = useNavigate();
@@ -52,6 +54,12 @@ export function CamerasPage() {
   );
 
   const list = useListQuery<Camera>({ key: ['cameras', 'list'], fetcher: camerasApi.list, filters, defaultSort: 'name', defaultOrder: 'asc' });
+  const rows = list.items;
+  const total = list.total;
+  const loading = list.query.isLoading;
+  const fetching = list.query.isFetching;
+  const error = list.query.error;
+  const refetch = () => void list.query.refetch();
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -69,22 +77,22 @@ export function CamerasPage() {
     { title: 'Police station', dataIndex: 'police_station', width: 140, ellipsis: true, render: (v: string | null) => v ?? <span style={{ color: '#9CA3AF' }}>—</span> },
     { title: 'Type', dataIndex: 'type', width: 100, render: (v: string) => cameraTypeLabel(v) },
     { title: 'Codec', dataIndex: 'codec', width: 80, render: (v: string) => <CodecTag codec={v} /> },
-    { title: 'Status', dataIndex: 'status', key: 'status', width: 110, sorter: true, render: (v: string) => <StatusTag status={v} size="small" /> },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 170, sorter: true, render: (v: string, r) => <StatusTag status={v} live={r.live} size="small" /> },
     { title: 'Maint.', dataIndex: 'maintenance_status', width: 120, render: (v: string) => (v === 'ok' ? <span style={{ color: '#9CA3AF' }}>—</span> : <MaintenanceTag status={v} size="small" />) },
     { title: 'AMC', dataIndex: 'amc_status', key: 'amc_expiry', width: 110, sorter: true, render: (v: string) => (v === 'ok' || v === 'none' ? <span style={{ color: '#9CA3AF' }}>{v === 'ok' ? 'valid' : '—'}</span> : <AmcTag status={v} size="small" />) },
-    { title: 'Uptime 24h', dataIndex: 'uptime_24h_pct', width: 100, align: 'right', render: (v: number | null) => fmtPct(v, 0) },
+    { title: 'Uptime 24h', dataIndex: 'uptime_24h_pct', width: 100, align: 'right', render: (v: number | null, r) => (r.status === 'not_streaming' || (r.live === false && r.status !== 'retired') ? <span style={{ color: '#9CA3AF' }} title="Not monitored: never delivered a stream">—</span> : fmtPct(v, 0)) },
     { title: 'ANPR', dataIndex: 'anpr_enabled', width: 70, align: 'center', render: (v: boolean) => (v ? <span style={{ color: '#1E4DB7', fontWeight: 600 }}>on</span> : <span style={{ color: '#9CA3AF' }}>—</span>) },
     { title: 'Last seen', dataIndex: 'last_seen_at', key: 'last_seen_at', width: 140, sorter: true, render: (v: string | null) => <IstTime value={v} /> },
   ];
 
-  const empty = !list.query.isLoading && list.total === 0;
+  const empty = !loading && total === 0;
   const hasFilters = Boolean(debouncedQ || department || district || type || status.length);
 
   return (
     <div>
       <PageHeader
         title="Cameras"
-        description={`Camera registry · ${list.total} camera${list.total === 1 ? '' : 's'}${hasFilters ? ' matching filters' : ''}. Click a row for metadata, health history and streams.`}
+        description={`Camera registry · ${total} camera${total === 1 ? '' : 's'}${hasFilters ? ' matching filters' : ''}. Click a row for metadata, health history and streams.`}
         extra={
           <Space wrap>
             {canExport ? (
@@ -119,7 +127,7 @@ export function CamerasPage() {
             <Select allowClear placeholder="Department" style={{ width: 200 }} options={deptOptions} value={department} onChange={setDepartment} showSearch optionFilterProp="label" aria-label="Department" />
             <Select allowClear placeholder="District" style={{ width: 160 }} options={districts.map((d) => ({ value: d, label: d }))} value={district} onChange={setDistrict} showSearch aria-label="District" />
             <Select allowClear placeholder="Type" style={{ width: 120 }} options={TYPES.map((t) => ({ value: t, label: cameraTypeLabel(t) }))} value={type} onChange={setType} aria-label="Type" />
-            <Select mode="multiple" allowClear placeholder="Status" style={{ minWidth: 160 }} options={STATUSES.map((s) => ({ value: s, label: s }))} value={status} onChange={setStatus} maxTagCount="responsive" aria-label="Status" />
+            <Select mode="multiple" allowClear placeholder="Status" style={{ minWidth: 190 }} options={STATUSES.map((s) => ({ value: s, label: statusLabel(s) }))} value={status} onChange={setStatus} maxTagCount="responsive" aria-label="Status" />
           </div>
           <div className="sg-toolbar-right">
             <Tooltip title="Include retired cameras">
@@ -128,12 +136,12 @@ export function CamerasPage() {
                 <span style={{ fontSize: 12, color: '#6B7280' }}>Retired</span>
               </Space>
             </Tooltip>
-            <Button icon={<ReloadOutlined />} onClick={() => void list.query.refetch()} loading={list.query.isFetching} aria-label="Refresh" />
+            <Button icon={<ReloadOutlined />} onClick={refetch} loading={fetching} aria-label="Refresh" />
           </div>
         </div>
-        {list.query.isError ? (
+        {error ? (
           <div style={{ padding: 16 }}>
-            <ErrorState error={list.query.error} onRetry={() => void list.query.refetch()} />
+            <ErrorState error={error} onRetry={refetch} />
           </div>
         ) : empty ? (
           <EmptyState
@@ -170,14 +178,14 @@ export function CamerasPage() {
             size="middle"
             rowKey="id"
             columns={columns}
-            dataSource={list.items}
-            loading={list.query.isLoading}
+            dataSource={rows}
+            loading={loading}
             pagination={list.pagination}
             onChange={list.onTableChange}
             sticky
             scroll={{ x: 1560 }}
             rowClassName={(r) => (r.status === 'retired' ? 'sg-row-retired' : '')}
-            onRow={(r) => ({ onClick: () => setOpenId(r.id) })}
+            onRow={(r) => rowProps(() => setOpenId(r.id))}
           />
         )}
       </Card>
@@ -198,7 +206,7 @@ export function CamerasPage() {
           { label: 'Search', value: debouncedQ || 'all' },
           { label: 'Department', value: department ? deptOptions.find((d) => d.value === department)?.label : 'all' },
           { label: 'District', value: district ?? 'all' },
-          { label: 'Status', value: status.length ? status.join(', ') : 'all' },
+          { label: 'Status', value: status.length ? status.map(statusLabel).join(', ') : 'all' },
           { label: 'Rows', value: list.total },
         ]}
         onExport={() => camerasApi.exportCsv(filters)}

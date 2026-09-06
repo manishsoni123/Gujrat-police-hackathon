@@ -53,7 +53,7 @@ async def create_clip(body: ClipCreate, user: CurrentUser, db: DbDep, request: R
         s = await db.get(Sighting, body.sighting_id)
         if s is None or s.camera_id != cam.id:
             raise validation_error("Unknown sighting", [{"field": "sighting_id", "message": "sighting not found on this camera"}])
-    path = play_path(cam.id, cam.codec) if cam.rtsp_url else None
+    path = play_path(cam.id, cam.codec, cam.meta) if cam.rtsp_url else None
     if not path or not cam.record_enabled:
         raise conflict("No recording is available for this camera (recording is not enabled)")
     segs = _segments(await playback_list(path, start - timedelta(minutes=2), start + timedelta(seconds=body.duration_s)), path)

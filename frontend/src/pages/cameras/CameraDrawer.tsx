@@ -6,8 +6,10 @@ import { Button, DatePicker, Descriptions, Drawer, Form, Input, Modal, Select, S
 import { DeleteOutlined, EditOutlined, PlayCircleOutlined, ToolOutlined } from '@ant-design/icons';
 import { camerasApi, detectionsApi, eventsApi } from '@/api';
 import type { Camera, CameraDetail, MaintenanceUpdate } from '@/api/types';
-import { AmcTag, BoolTag, CodecTag, DepartmentTag, MaintenanceTag, StatusTag, EventTypeTag } from '@/components/Tags';
+import { AmcTag, BoolTag, CodecTag, DepartmentTag, LocationConfidenceTag, MaintenanceTag, StatusTag, EventTypeTag, codecLabel } from '@/components/Tags';
+import { rowProps } from '@/hooks/useListQuery';
 import { IstTime } from '@/components/IstTime';
+import { maskUrlCredentials } from '@/utils/url';
 import { PlateText } from '@/components/PlateText';
 import { ConfidenceBar, CropThumb } from '@/components/Misc';
 import { ConfirmDialog } from '@/components/Dialogs';
@@ -100,7 +102,7 @@ export function CameraDrawer({ cameraId, onClose, onEdit }: CameraDrawerProps) {
         c ? (
           <Space wrap>
             <span>{c.name}</span>
-            <StatusTag status={c.status} />
+            <StatusTag status={c.status} live={c.live} />
             <MaintenanceTag status={c.maintenance_status} size="small" />
             <CodecTag codec={c.codec} />
             {c.anpr_enabled ? <Tag color="blue" style={{ margin: 0 }}>ANPR</Tag> : null}
@@ -181,14 +183,25 @@ export function CameraDrawer({ cameraId, onClose, onEdit }: CameraDrawerProps) {
                       <Descriptions.Item label="Heading / FoV">
                         {fmtHeadingFov(c.heading_deg, c.fov_deg)}
                       </Descriptions.Item>
+                      {c.location_confidence || c.metadata?.enrichment ? (
+                        <Descriptions.Item label="Location confidence" span={2}>
+                          <LocationConfidenceTag confidence={c.location_confidence} />
+                          {c.metadata?.enrichment?.source ? <span style={{ marginLeft: 8, fontSize: 12, color: '#6B7280' }}>source: {c.metadata.enrichment.source}</span> : null}
+                          {c.metadata?.enrichment?.notes ? (
+                            <div style={{ marginTop: 4, fontSize: 12, color: '#4B5563' }} title="Team note explaining how the camera name was interpreted (media/cameras_enrichment.csv)">
+                              {c.metadata.enrichment.notes}
+                            </div>
+                          ) : null}
+                        </Descriptions.Item>
+                      ) : null}
                       <Descriptions.Item label="Relay path">
                         <code>{c.relay_path ?? '—'}</code>
                       </Descriptions.Item>
                       <Descriptions.Item label="Stream">
-                        {c.codec} · {c.resolution ?? '—'} · {c.fps ?? '—'} fps
+                        {codecLabel(c.codec)} · {c.resolution ?? '—'} · {c.fps ?? '—'} fps
                       </Descriptions.Item>
                       <Descriptions.Item label="RTSP URL" span={2}>
-                        <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{c.rtsp_url ?? '— (no stream URL: never checked, surfaces in gap report)'}</code>
+                        <code style={{ fontSize: 12, wordBreak: 'break-all' }} title="Credentials are always masked (user:***@host)">{c.rtsp_url ? maskUrlCredentials(c.rtsp_url) : '— (no stream URL: never checked, surfaces in gap report)'}</code>
                       </Descriptions.Item>
                       <Descriptions.Item label="Connectivity">
                         {c.connectivity_type ? c.connectivity_type.toUpperCase() : '—'} {c.bandwidth_kbps ? `· ${c.bandwidth_kbps} kbps` : ''}
@@ -215,7 +228,7 @@ export function CameraDrawer({ cameraId, onClose, onEdit }: CameraDrawerProps) {
                         <IstTime value={c.last_maintenance_at} />
                       </Descriptions.Item>
                       <Descriptions.Item label="Catalogue live">
-                        <BoolTag value={c.live} />
+                        <BoolTag value={c.live} yes="Yes" no="No (not streaming)" />
                       </Descriptions.Item>
                       <Descriptions.Item label="Created">
                         <IstTime value={c.created_at} /> {c.created_by_username ? `by ${c.created_by_username}` : `via ${c.created_via}`}
@@ -235,7 +248,7 @@ export function CameraDrawer({ cameraId, onClose, onEdit }: CameraDrawerProps) {
                   rowKey="id"
                   pagination={false}
                   dataSource={reads.data.items}
-                  onRow={(r) => ({ onClick: () => navigate(`/detections?id=${r.id}`) })}
+                  onRow={(r) => rowProps(() => navigate(`/detections?id=${r.id}`))}
                   columns={[
                     { title: 'Crop', dataIndex: 'crop_url', width: 110, render: (u: string | null, r) => <CropThumb src={u} alt={`Plate crop ${r.plate_display}`} sha256={r.crop_sha256} /> },
                     { title: 'Plate', dataIndex: 'plate_norm', render: (p: string, r) => <PlateText plate={p} raw={r.plate_raw} invalid={!r.is_valid_format} /> },

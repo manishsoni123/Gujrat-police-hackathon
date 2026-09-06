@@ -44,6 +44,17 @@ class ProbeResult:
     width: int | None = None
     height: int | None = None
     error: str | None = None
+    fps: float | None = None  # only when plausible (1–60); never trusted for timing (organiser rule: PTS)
+    profile: str | None = None
+    b_frames: int | None = None  # ffprobe `has_b_frames`: WebRTC cannot carry B-frame H.264 (MediaMTX refuses the reader)
+    duration_ms: int | None = None
+
+    @property
+    def resolution(self) -> str | None:
+        return f"{self.width}x{self.height}" if self.width and self.height else None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"ok": self.ok, "codec": self.codec, "resolution": self.resolution, "fps": self.fps, "profile": self.profile, "b_frames": self.b_frames, "duration_ms": self.duration_ms, "error": self.error}
 
 
 class CameraSourceAdapter(ABC):

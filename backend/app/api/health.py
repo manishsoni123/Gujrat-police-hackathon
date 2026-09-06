@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbDep, require_permission, user_scope
+from app.core.config import settings as env
 from app.core.tz import iso_z, utcnow
 from app.db.models import Camera
 from app.services import lookups
@@ -44,7 +45,8 @@ async def health_summary(user: CurrentUser, db: DbDep):
         if c.maintenance_status != "ok"
     ]
     anpr_live = sum(1 for c in cams if c.anpr_enabled)
-    return {
+    not_streaming = [{"id": c.id, "name": c.name, "district": c.district, "since": iso_z(c.last_status_change_at)} for c in cams if c.status == "not_streaming"]
+    out = {
         "checked_at": iso_z(poller.last_run_at or now),
         "cameras": counts,
         "uptime_24h_pct": await uptime_24h(db, conds),
@@ -53,6 +55,16 @@ async def health_summary(user: CurrentUser, db: DbDep):
         "amc_expiring_30d": amc,
         "maintenance": maintenance,
         "disk": disk_usage(),
-        "mediamtx": {"ok": bool(poller.mediamtx_ok), "paths": poller.mediamtx_paths, "ready": poller.mediamtx_ready},
-        "anpr_workers": await worker_status(db),
+        "mediamtx": {
+            "ok": bool(poller.mediamtx_ok), "paths": poller.mediamtx_paths, "ready": poller.mediamtx_ready,
+            # relay policy (Amendments 2026-09-05): cam_<id> paths with a persistent upstream source, and how many are up
+            "persistent": poller.relay_persistent, "persistent_ready": poller.relay_persistent_ready,
+        },
+        "anpr_workers": await worker_status(db, scope),
+        # never-online cameras (catalogue live=false or a source that never answered): not outages, listed separately
+        "not_streaming": not_streaming,
+        "default_secrets_in_use": bool(env.default_secrets_in_use),
     }
+    if user.role == "admin":
+        out["default_secrets"] = list(env.default_secrets_in_use)
+    return out

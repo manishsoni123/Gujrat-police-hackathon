@@ -63,3 +63,17 @@ Thumbs.db
 
 # scripted acceptance-check outputs (scripts/integration_checks.mjs)
 scripts/out/
+
+# ---- measurement artefacts from the real organiser feed (crops of real vehicles, survey frames,
+#      per-track evidence, loop checks): kept on the laptop and shared out of band, never pushed.
+#      media/anpr_evidence must exist for the anpr-live bind mount, hence the .gitkeep.
+media/anpr_crops/
+media/anpr_measure/
+media/anpr_survey/
+media/loopcheck/
+media/anpr_evidence/*
+!media/anpr_evidence/.gitkeep
+
+# ---- generated deliverables (make deliverables) and screenshot build directories
+docs/export/
+docs/screenshots/**/.build/
