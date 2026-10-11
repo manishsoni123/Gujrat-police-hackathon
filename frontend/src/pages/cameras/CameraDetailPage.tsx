@@ -19,7 +19,7 @@ import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolT
 import { rowProps } from '@/hooks/useListQuery';
 import { IstTime } from '@/components/IstTime';
 import { PlateText } from '@/components/PlateText';
-import { ConfidenceBar, CropThumb } from '@/components/Misc';
+import { CropThumb } from '@/components/Misc';
 import { EmptyState, ErrorState, PageSkeleton } from '@/components/States';
 import { HealthLogTable } from './HealthLogTable';
 import { RecordingsTimeline } from '@/components/Recordings';
@@ -64,8 +64,8 @@ function LiveReadsList({ reads, connected }: { reads: Detection[]; connected: bo
             </div>
           ),
         },
-        { title: 'Conf.', dataIndex: 'confidence', width: 130, render: (v: number) => <ConfidenceBar value={v} width={60} /> },
-        { title: 'Time (IST)', dataIndex: 'captured_at', width: 130, render: (v: string) => <IstTime value={v} /> },
+        { title: 'Conf.', dataIndex: 'confidence', width: 64, render: (v: number) => <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500, color: v >= 0.85 ? '#16A34A' : v >= 0.6 ? '#D97706' : '#DC2626' }}>{Math.round(v * 100)} %</span> },
+        { title: 'Time (IST)', dataIndex: 'captured_at', width: 124, render: (v: string) => <IstTime value={v} /> },
       ]}
     />
   );
@@ -238,7 +238,7 @@ export function CameraDetailPage() {
             activeKey={tab}
             onChange={setTab}
             items={[
-              { key: 'reads', label: <span>Live reads <Badge count={reads.length} size="small" color="#1E4DB7" overflowCount={50} style={{ marginLeft: 4 }} /></span>, children: <LiveReadsList reads={reads} connected={ws.connected} /> },
+              { key: 'reads', label: <span>Live reads <Badge count={reads.length} size="small" color="#1F63F5" overflowCount={50} style={{ marginLeft: 4 }} /></span>, children: <LiveReadsList reads={reads} connected={ws.connected} /> },
               { key: 'objects', label: 'Objects', children: <ObjectsTab cameraId={c.id} live={ws.counts?.counts ?? null} /> },
               { key: 'health', label: 'Health', children: <HealthLogTable cameraId={c.id} /> },
               { key: 'recordings', label: 'Recordings', children: <RecordingsTimeline cameraId={c.id} cameraName={c.name} /> },

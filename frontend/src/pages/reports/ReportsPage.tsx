@@ -205,7 +205,7 @@ export function ReportsPage() {
                   <div>
                     <div style={{ display: 'flex', gap: 24 }}>
                       <Statistic title="Exact plate match" value={qr.exact_match_pct ?? '—'} suffix={qr.exact_match_pct !== null ? '%' : ''} valueStyle={{ color: '#16A34A' }} />
-                      <Statistic title="Character accuracy" value={qr.char_accuracy_pct ?? '—'} suffix={qr.char_accuracy_pct !== null ? '%' : ''} valueStyle={{ color: '#1E4DB7' }} />
+                      <Statistic title="Character accuracy" value={qr.char_accuracy_pct ?? '—'} suffix={qr.char_accuracy_pct !== null ? '%' : ''} valueStyle={{ color: '#1F63F5' }} />
                     </div>
                     <Table size="small" pagination={false} rowKey="camera_id" dataSource={qr.per_camera_accuracy} style={{ marginTop: 8 }} locale={{ emptyText: <EmptyState compact title="No per-camera breakdown" description="Labels exist but none fall on a camera in this window." /> }} columns={[{ title: 'Camera', dataIndex: 'camera_name', ellipsis: true }, { title: 'n', dataIndex: 'labelled', width: 50, align: 'right' }, { title: 'Exact', dataIndex: 'exact_pct', width: 80, align: 'right', render: (v: number) => fmtPct(v) }, { title: 'Chars', dataIndex: 'char_accuracy_pct', width: 80, align: 'right', render: (v: number) => fmtPct(v) }]} />
                   </div>

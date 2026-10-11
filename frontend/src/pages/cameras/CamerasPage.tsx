@@ -81,7 +81,7 @@ export function CamerasPage() {
     { title: 'Maint.', dataIndex: 'maintenance_status', width: 120, render: (v: string) => (v === 'ok' ? <span style={{ color: '#9CA3AF' }}>—</span> : <MaintenanceTag status={v} size="small" />) },
     { title: 'AMC', dataIndex: 'amc_status', key: 'amc_expiry', width: 110, sorter: true, render: (v: string) => (v === 'ok' || v === 'none' ? <span style={{ color: '#9CA3AF' }}>{v === 'ok' ? 'valid' : '—'}</span> : <AmcTag status={v} size="small" />) },
     { title: 'Uptime 24h', dataIndex: 'uptime_24h_pct', width: 100, align: 'right', render: (v: number | null, r) => (r.status === 'not_streaming' || (r.live === false && r.status !== 'retired') ? <span style={{ color: '#9CA3AF' }} title="Not monitored: never delivered a stream">—</span> : fmtPct(v, 0)) },
-    { title: 'ANPR', dataIndex: 'anpr_enabled', width: 70, align: 'center', render: (v: boolean) => (v ? <span style={{ color: '#1E4DB7', fontWeight: 600 }}>on</span> : <span style={{ color: '#9CA3AF' }}>—</span>) },
+    { title: 'ANPR', dataIndex: 'anpr_enabled', width: 70, align: 'center', render: (v: boolean) => (v ? <span style={{ color: '#1F63F5', fontWeight: 600 }}>on</span> : <span style={{ color: '#9CA3AF' }}>—</span>) },
     { title: 'Last seen', dataIndex: 'last_seen_at', key: 'last_seen_at', width: 140, sorter: true, render: (v: string | null) => <IstTime value={v} /> },
   ];
 

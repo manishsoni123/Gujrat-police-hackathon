@@ -142,7 +142,7 @@ export function RecordingsTimeline({ cameraId, cameraName }: RecordingsTimelineP
                       type="button"
                       onClick={() => setPlaying(s)}
                       aria-label={`Play segment starting ${fmtIst(s.start)}`}
-                      style={{ width: 14, height: 22, borderRadius: 3, border: 0, background: playing?.start === s.start ? '#1E4DB7' : '#93C5FD', cursor: 'pointer', padding: 0 }}
+                      style={{ width: 14, height: 22, borderRadius: 3, border: 0, background: playing?.start === s.start ? '#1F63F5' : '#93C5FD', cursor: 'pointer', padding: 0 }}
                     />
                   </Tooltip>
                 ))}

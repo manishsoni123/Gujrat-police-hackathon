@@ -25,7 +25,7 @@ function DetectorTag({ detector }: { detector: string | null | undefined }) {
     return <ColourTag colour="#D97706" label="Contour fallback" size="small" title="Plate detector: bright-quadrilateral contour finder. Reads the synthetic plates on this CPU-only laptop but is a weak fallback on real footage; the ONNX detector (YOLO-v9-t) is the production path." />;
   }
   if (detector === 'onnx') return <ColourTag colour="#16A34A" label="ONNX detector" size="small" title="Plate detector: YOLO-v9-t ONNX model (open-image-models)" />;
-  if (detector === 'auto') return <ColourTag colour="#1E4DB7" label="ONNX + contour fallback" size="small" title="Plate detector: YOLO-v9-t ONNX first; the contour finder only on frames where ONNX returns no box" />;
+  if (detector === 'auto') return <ColourTag colour="#1F63F5" label="ONNX + contour fallback" size="small" title="Plate detector: YOLO-v9-t ONNX first; the contour finder only on frames where ONNX returns no box" />;
   return <ColourTag colour="#6B7280" label={detector} size="small" title="Plate detector reported by the worker" />;
 }
 
@@ -78,7 +78,7 @@ export function HealthPage() {
         }
       />
       <div className="sg-grid sg-grid-7" style={{ marginBottom: 12 }}>
-        <KpiTile label="Cameras" value={cameras.total} icon={<VideoCameraOutlined />} colour="#1E4DB7" footer={`${h.anpr_live_cameras} with live ANPR`} onClick={() => navigate('/cameras')} />
+        <KpiTile label="Cameras" value={cameras.total} icon={<VideoCameraOutlined />} colour="#1F63F5" footer={`${h.anpr_live_cameras} with live ANPR`} onClick={() => navigate('/cameras')} />
         <KpiTile label="Online" value={cameras.online} icon={<CheckCircleOutlined />} colour="#16A34A" onClick={() => navigate('/cameras?status=online')} />
         <KpiTile label="Degraded" value={cameras.degraded} icon={<ExclamationCircleOutlined />} colour="#D97706" onClick={() => navigate('/cameras?status=degraded')} />
         <KpiTile label="Offline" value={cameras.offline} icon={<CloseCircleOutlined />} colour="#DC2626" hint="Should stream but failed three health checks in a row" onClick={() => navigate('/cameras?status=offline')} />
@@ -108,7 +108,7 @@ export function HealthPage() {
           </Typography.Text>
         </Card>
         <Card size="small" title={<Space><DatabaseOutlined /> Storage</Space>}>
-          <Progress percent={Math.round((h.disk.data_used_bytes / Math.max(1, diskTotal)) * 100)} size="small" strokeColor="#1E4DB7" />
+          <Progress percent={Math.round((h.disk.data_used_bytes / Math.max(1, diskTotal)) * 100)} size="small" strokeColor="#1F63F5" />
           <div style={{ fontSize: 12, color: '#4B5563', marginTop: 4 }}>
             Data volume {fmtBytes(h.disk.data_used_bytes)} used · {fmtBytes(h.disk.data_free_bytes)} free
           </div>

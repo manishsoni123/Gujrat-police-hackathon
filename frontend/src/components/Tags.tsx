@@ -133,7 +133,7 @@ export function codecLabel(codec: string | null | undefined): string {
 
 export function CodecTag({ codec, size = 'small' }: { codec: string | null | undefined; size?: 'small' | 'default' }) {
   if (!codec) return null;
-  const colour = codec === 'H265' ? '#7C3AED' : codec === 'H264' ? '#1E4DB7' : '#6B7280';
+  const colour = codec === 'H265' ? '#7C3AED' : codec === 'H264' ? '#1F63F5' : '#6B7280';
   return <ColourTag colour={colour} label={codecLabel(codec)} size={size} title={codec === 'H265' ? 'Transcoded to H.264 by the relay for browser playback' : undefined} />;
 }
 
@@ -143,7 +143,7 @@ export function WatchlistHitTag({ size = 'small' }: { size?: 'small' | 'default'
 }
 
 export function RoleTag({ role, size = 'small' }: { role: string; size?: 'small' | 'default' }) {
-  const colours: Record<string, string> = { admin: '#DC2626', dept_admin: '#7C3AED', operator: '#1E4DB7', viewer: '#6B7280' };
+  const colours: Record<string, string> = { admin: '#DC2626', dept_admin: '#7C3AED', operator: '#1F63F5', viewer: '#6B7280' };
   const labels: Record<string, string> = { admin: 'Admin', dept_admin: 'Dept admin', operator: 'Operator', viewer: 'Viewer' };
   return <ColourTag colour={colours[role] ?? '#6B7280'} label={labels[role] ?? humanise(role)} size={size} />;
 }

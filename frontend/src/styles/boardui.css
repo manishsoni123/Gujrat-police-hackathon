@@ -1,0 +1,382 @@
+/* ==========================================================================
+   BoardUI look (boardui.com/components): neutral surfaces, hairline borders, gradient primary buttons,
+   white secondary buttons, soft ghost, pill badges, quiet tables. Colour tokens live in theme/tokens.ts.
+   Loaded after global.css so these rules win over layout defaults.
+   ========================================================================== */
+:root {
+  --sg-accent: #1f63f5;
+  --sg-accent-grad: linear-gradient(180deg, #2673fe 0%, #144be9 100%);
+  --sg-accent-grad-hover: linear-gradient(180deg, #3b82ff 0%, #1d57f2 100%);
+  --sg-danger-grad: linear-gradient(180deg, #f2283a 0%, #d3101f 100%);
+  --sg-neutral-100: #f5f5f5;
+  --sg-neutral-200: #e5e5e5;
+  --sg-neutral-300: #d4d4d4;
+  --sg-shadow-xs: 0 1px 2px rgba(10, 10, 10, 0.05);
+  --sg-shadow-card: 0 1px 2px rgba(10, 10, 10, 0.04), 0 0 0 1px rgba(10, 10, 10, 0.02);
+  --sg-ring: 0 0 0 3px rgba(31, 99, 245, 0.18);
+}
+body {
+  color: #0a0a0a;
+}
+
+/* buttons */
+.ant-btn {
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+}
+.ant-btn:not(:disabled):active {
+  transform: translateY(0.5px);
+}
+.ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):not(.ant-btn-disabled) {
+  background: var(--sg-accent-grad);
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(20, 75, 233, 0.35);
+}
+.ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):not(.ant-btn-disabled):hover {
+  background: var(--sg-accent-grad-hover);
+}
+.ant-btn-primary.ant-btn-dangerous:not(:disabled) {
+  background: var(--sg-danger-grad);
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(211, 16, 31, 0.35);
+}
+.ant-btn-default:not(.ant-btn-dangerous):not(:disabled) {
+  background: #fff;
+  border-color: var(--sg-neutral-200);
+  color: #0a0a0a;
+  box-shadow: var(--sg-shadow-xs);
+}
+.ant-btn-default:not(.ant-btn-dangerous):not(:disabled):hover {
+  background: #fafafa;
+  border-color: var(--sg-neutral-300);
+  color: #0a0a0a;
+}
+.ant-btn-default.ant-btn-dangerous:not(:disabled) {
+  box-shadow: var(--sg-shadow-xs);
+}
+/* ghost = BoardUI "ghost": soft blue action surface */
+.ant-btn-dashed:not(:disabled) {
+  background: #e3edff;
+  border-color: transparent;
+  border-style: solid;
+  color: #1747c7;
+}
+.ant-btn-dashed:not(:disabled):hover {
+  background: #cfe0ff;
+  color: #1747c7;
+}
+.ant-btn-text:not(:disabled):hover {
+  background: var(--sg-neutral-100);
+}
+.ant-btn:disabled,
+.ant-btn.ant-btn-disabled {
+  background: #ececec;
+  border-color: transparent;
+  color: #a3a3a3;
+  box-shadow: none;
+}
+
+/* inputs, selects, pickers */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-select:not(.ant-select-customize-input) .ant-select-selector,
+.ant-picker {
+  border-color: var(--sg-neutral-200);
+  box-shadow: var(--sg-shadow-xs);
+  border-radius: 8px;
+}
+.ant-input:hover,
+.ant-input-affix-wrapper:hover,
+.ant-input-number:hover,
+.ant-picker:hover,
+.ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+  border-color: var(--sg-neutral-300);
+}
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-affix-wrapper-focused,
+.ant-input-number-focused,
+.ant-picker-focused,
+.ant-select-focused:not(.ant-select-disabled) .ant-select-selector {
+  border-color: var(--sg-accent);
+  box-shadow: var(--sg-ring);
+}
+.ant-input-disabled,
+.ant-input-affix-wrapper-disabled,
+.ant-select-disabled .ant-select-selector,
+.ant-picker-disabled {
+  background: var(--sg-neutral-100);
+  box-shadow: none;
+}
+.ant-form-item-label > label {
+  font-weight: 500;
+  color: #0a0a0a;
+}
+.ant-select-dropdown,
+.ant-picker-dropdown .ant-picker-panel-container {
+  border: 1px solid var(--sg-neutral-200);
+  border-radius: 12px;
+}
+.ant-dropdown .ant-dropdown-menu {
+  border: 1px solid var(--sg-neutral-200);
+  border-radius: 12px;
+  padding: 6px;
+}
+.ant-dropdown .ant-dropdown-menu-item {
+  border-radius: 8px;
+}
+
+/* checkbox, radio, switch */
+.ant-checkbox-inner {
+  border-radius: 5px;
+  border-color: var(--sg-neutral-300);
+  box-shadow: var(--sg-shadow-xs);
+}
+.ant-checkbox-checked .ant-checkbox-inner,
+.ant-checkbox-indeterminate .ant-checkbox-inner {
+  background: var(--sg-accent-grad);
+  border-color: #144be9;
+}
+.ant-radio-inner {
+  border-color: var(--sg-neutral-300);
+}
+.ant-switch {
+  background: var(--sg-neutral-300);
+}
+.ant-switch.ant-switch-checked {
+  background: var(--sg-accent-grad);
+}
+.ant-switch .ant-switch-handle::before {
+  box-shadow: 0 1px 3px rgba(10, 10, 10, 0.25);
+}
+
+/* segmented control */
+.ant-segmented {
+  background: var(--sg-neutral-100);
+  border-radius: 10px;
+}
+.ant-segmented .ant-segmented-item-selected,
+.ant-segmented .ant-segmented-thumb {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(10, 10, 10, 0.1), 0 0 0 1px rgba(10, 10, 10, 0.04);
+  border-radius: 8px;
+}
+.ant-segmented .ant-segmented-item-selected {
+  color: #0a0a0a;
+  font-weight: 500;
+}
+
+/* badges / chips: pill, no border */
+.ant-tag {
+  border-radius: 999px;
+  border-color: transparent !important;
+  padding-inline: 10px;
+  font-weight: 500;
+}
+.ant-badge-count {
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* cards (also BoardUI stat cards) */
+.ant-card {
+  border-radius: 12px;
+  border-color: var(--sg-neutral-200);
+  box-shadow: var(--sg-shadow-card);
+}
+.ant-card-head {
+  border-bottom-color: var(--sg-neutral-200);
+  min-height: 52px;
+}
+.ant-card-head-title {
+  font-weight: 600;
+}
+.ant-card-hoverable:hover {
+  border-color: var(--sg-neutral-300);
+  box-shadow: 0 4px 16px rgba(10, 10, 10, 0.08);
+}
+
+/* tables: quiet header, hairline rows, rounded container */
+.ant-table-wrapper .ant-table {
+  border-radius: 12px;
+}
+.ant-table-wrapper .ant-table-container {
+  border: 1px solid var(--sg-neutral-200);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.sg-card-table .ant-table-wrapper .ant-table-container {
+  border: 0;
+  border-radius: 0;
+}
+.ant-table-wrapper .ant-table-thead > tr > th {
+  background: #fafafa;
+  color: #737373;
+  font-weight: 500;
+  border-bottom: 1px solid var(--sg-neutral-200);
+}
+.ant-table-wrapper .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--sg-neutral-200);
+}
+.ant-table-wrapper .ant-table-tbody > tr:last-child > td {
+  border-bottom: 0;
+}
+.sg-table .ant-table-thead > tr > th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #737373;
+}
+
+/* pagination: bordered Previous / Next, quiet numbers */
+.ant-pagination .ant-pagination-item {
+  border-radius: 8px;
+  border-color: transparent;
+}
+.ant-pagination .ant-pagination-item a {
+  color: #737373;
+}
+.ant-pagination .ant-pagination-item-active {
+  background: #fff;
+  border-color: var(--sg-neutral-200);
+  box-shadow: var(--sg-shadow-xs);
+}
+.ant-pagination .ant-pagination-item-active a {
+  color: #0a0a0a;
+  font-weight: 500;
+}
+.ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  border-radius: 8px;
+  border: 1px solid var(--sg-neutral-200);
+  background: #fff;
+  box-shadow: var(--sg-shadow-xs);
+}
+
+/* tabs: underline accent */
+.ant-tabs .ant-tabs-tab {
+  color: #737373;
+  font-weight: 500;
+}
+.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #0a0a0a;
+}
+.ant-tabs .ant-tabs-ink-bar {
+  background: var(--sg-accent);
+  height: 2px;
+  border-radius: 2px;
+}
+.ant-tabs-top > .ant-tabs-nav::before {
+  border-bottom-color: var(--sg-neutral-200);
+}
+
+/* sidebar navigation (light rail) and header */
+.sg-sider.ant-layout-sider {
+  border-right: 1px solid var(--sg-neutral-200);
+}
+.sg-sider .ant-menu-light {
+  background: transparent;
+}
+.sg-sider .ant-menu-item-group-title {
+  color: #a3a3a3;
+  font-weight: 500;
+}
+.sg-sider .ant-menu-light .ant-menu-item {
+  font-weight: 500;
+}
+.sg-sider .ant-menu-light .ant-menu-item-selected {
+  background: #e3edff;
+  color: #1747c7;
+}
+.ant-layout-header {
+  border-bottom: 1px solid var(--sg-neutral-200);
+}
+
+/* overlays */
+.ant-modal .ant-modal-content {
+  border: 1px solid var(--sg-neutral-200);
+  border-radius: 16px;
+  padding: 24px;
+}
+.ant-modal .ant-modal-header {
+  margin-bottom: 12px;
+}
+.ant-drawer .ant-drawer-header {
+  border-bottom-color: var(--sg-neutral-200);
+}
+.ant-tooltip .ant-tooltip-inner {
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.ant-notification .ant-notification-notice,
+.ant-message .ant-message-notice-content {
+  border: 1px solid var(--sg-neutral-200);
+  border-radius: 12px;
+}
+.ant-alert {
+  border-radius: 12px;
+}
+.ant-divider {
+  border-block-start-color: var(--sg-neutral-200);
+}
+.ant-progress-bg {
+  border-radius: 999px;
+}
+.ant-upload.ant-upload-drag {
+  border-radius: 12px;
+  background: #fafafa;
+  border-color: var(--sg-neutral-300);
+}
+.ant-upload.ant-upload-drag:hover {
+  border-color: var(--sg-accent);
+}
+.ant-steps .ant-steps-item-process .ant-steps-item-icon {
+  background: var(--sg-accent-grad);
+  border-color: transparent;
+}
+.ant-collapse {
+  border-radius: 12px;
+  border-color: var(--sg-neutral-200);
+}
+.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  font-weight: 500;
+}
+.ant-descriptions-bordered .ant-descriptions-item-label {
+  background: #fafafa;
+  color: #737373;
+}
+
+/* alerts: soft BoardUI banners instead of saturated antd tints */
+.ant-alert {
+  border: 1px solid var(--sg-neutral-200);
+  background: #fff;
+  box-shadow: var(--sg-shadow-xs);
+}
+.ant-alert-info {
+  background: #f3f7ff;
+  border-color: #d6e4ff;
+}
+.ant-alert-info .ant-alert-icon { color: var(--sg-accent); }
+.ant-alert-success { background: #f4fbe9; border-color: #d9f0b3; }
+.ant-alert-warning { background: #fffbeb; border-color: #fde68a; }
+.ant-alert-error { background: #fff1f2; border-color: #fecdd3; }
+
+/* tables nested in cards: no second border, just a hairline under the card header / filters */
+.ant-card .ant-table-wrapper .ant-table-container {
+  border: 0;
+  border-top: 1px solid var(--sg-neutral-200);
+  border-radius: 0 0 12px 12px;
+}
+.ant-card .ant-table-wrapper .ant-table-thead > tr > th:first-child { border-top-left-radius: 0; }
+.ant-card .ant-table-wrapper .ant-table-thead > tr > th:last-child { border-top-right-radius: 0; }
+
+/* disabled text / link buttons stay transparent (the grey fill is only for solid buttons) */
+.ant-btn-text:disabled,
+.ant-btn-text.ant-btn-disabled,
+.ant-btn-link:disabled,
+.ant-btn-link.ant-btn-disabled {
+  background: transparent;
+}

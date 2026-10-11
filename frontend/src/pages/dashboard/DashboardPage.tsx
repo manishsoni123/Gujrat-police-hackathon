@@ -111,7 +111,7 @@ export function DashboardPage() {
         }
       />
       <div className="sg-grid sg-grid-7" style={{ marginBottom: 12 }}>
-        <KpiTile label="Cameras" value={cameras?.total} icon={<VideoCameraOutlined />} colour="#1E4DB7" footer={`${s?.cameras.anpr_live ?? 0} with live ANPR`} onClick={() => navigate('/cameras')} />
+        <KpiTile label="Cameras" value={cameras?.total} icon={<VideoCameraOutlined />} colour="#1F63F5" footer={`${s?.cameras.anpr_live ?? 0} with live ANPR`} onClick={() => navigate('/cameras')} />
         <KpiTile label="Online" value={cameras?.online} icon={<CheckCircleOutlined />} colour="#16A34A" footer={`${cameras?.degraded ?? 0} degraded`} onClick={() => navigate('/cameras?status=online')} />
         <KpiTile label="Offline" value={cameras?.offline} icon={<CloseCircleOutlined />} colour="#DC2626" footer={`${cameras?.unknown ?? 0} unknown`} hint="Cameras that should stream but failed three health checks in a row." onClick={() => navigate('/health')} />
         <KpiTile

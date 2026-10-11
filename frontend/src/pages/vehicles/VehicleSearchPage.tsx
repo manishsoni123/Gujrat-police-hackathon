@@ -24,7 +24,7 @@ function HitCard({ hit, onDecision, canConfirm }: { hit: SearchHit; onDecision?:
   const navigate = useNavigate();
   const fuzzy = hit.match === 'fuzzy';
   return (
-    <Card size="small" style={{ borderLeft: `4px solid ${fuzzy ? (hit.confirmation === 'confirmed' ? '#16A34A' : hit.confirmation === 'rejected' ? '#9CA3AF' : '#D97706') : '#1E4DB7'}` }} styles={{ body: { padding: 12 } }}>
+    <Card size="small" style={{ borderLeft: `4px solid ${fuzzy ? (hit.confirmation === 'confirmed' ? '#16A34A' : hit.confirmation === 'rejected' ? '#9CA3AF' : '#D97706') : '#1F63F5'}` }} styles={{ body: { padding: 12 } }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <CropThumb src={hit.best_crop_url} alt={`Best crop for ${hit.plate_display}`} width={150} height={48} sha256={hit.frame_sha256} />
         <div style={{ flex: 1, minWidth: 0 }}>

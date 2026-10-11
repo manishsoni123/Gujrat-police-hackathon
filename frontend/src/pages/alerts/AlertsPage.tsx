@@ -245,14 +245,14 @@ export function AlertsPage() {
           <Space wrap>
             <Tooltip title="Play a sound on every new alert">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <SoundOutlined style={{ color: soundOn ? '#1E4DB7' : '#9CA3AF' }} aria-hidden />
+                <SoundOutlined style={{ color: soundOn ? '#1F63F5' : '#9CA3AF' }} aria-hidden />
                 <Switch size="small" checked={soundOn} onChange={setSoundOn} aria-label="Alert sound" />
                 <span style={{ fontSize: 12, color: '#4B5563' }}>Sound</span>
               </label>
             </Tooltip>
             <Tooltip title="Browser notification when this tab is in the background (asks for permission the first time)">
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <BellOutlined style={{ color: desktopNotify ? '#1E4DB7' : '#9CA3AF' }} aria-hidden />
+                <BellOutlined style={{ color: desktopNotify ? '#1F63F5' : '#9CA3AF' }} aria-hidden />
                 <Switch size="small" checked={desktopNotify} onChange={(v) => (v ? void enableDesktop() : setDesktopNotify(false))} aria-label="Desktop alerts" />
                 <span style={{ fontSize: 12, color: '#4B5563' }}>Desktop alerts</span>
               </label>

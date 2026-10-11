@@ -5,19 +5,22 @@
  */
 
 export const BRAND = {
-  navy: '#0B1F3A',
-  primary: '#1E4DB7',
+  navy: '#0A0A0A',
+  primary: '#1F63F5',
+  primaryHover: '#2673FE',
+  primaryActive: '#144BE9',
+  ghost: '#E3EDFF',
   success: '#16A34A',
   warning: '#D97706',
   error: '#DC2626',
   info: '#0EA5E9',
-  bgLayout: '#F5F7FA',
+  bgLayout: '#F7F7F8',
   bgContainer: '#FFFFFF',
-  text: '#111827',
-  textSecondary: '#4B5563',
-  border: '#E5E7EB',
-  headerBg: '#F3F4F6',
-  muted: '#9CA3AF',
+  text: '#0A0A0A',
+  textSecondary: '#737373',
+  border: '#E5E5E5',
+  headerBg: '#FAFAFA',
+  muted: '#A3A3A3',
 } as const;
 
 export type CameraStatus = 'unknown' | 'online' | 'degraded' | 'offline' | 'not_streaming' | 'retired';
@@ -130,7 +133,7 @@ export const LOCATION_CONFIDENCE: Record<LocationConfidence, { colour: string; l
 export const EVENT_TYPE: Record<string, { colour: string; label: string }> = {
   accident: { colour: '#DC2626', label: 'Accident' },
   suspicious: { colour: '#D97706', label: 'Suspicious' },
-  checkpoint: { colour: '#1E4DB7', label: 'Checkpoint' },
+  checkpoint: { colour: '#1F63F5', label: 'Checkpoint' },
   other: { colour: '#6B7280', label: 'Other' },
   watchlist_hit: { colour: '#DC2626', label: 'Watchlist hit' },
   loop_reset: { colour: '#9CA3AF', label: 'Loop reset' },
@@ -142,14 +145,14 @@ export const EVENT_TYPE: Record<string, { colour: string; label: string }> = {
 export const OBJECT_CLASS_COLOURS: Record<string, string> = {
   person: '#7C3AED',
   bicycle: '#0891B2',
-  car: '#1E4DB7',
+  car: '#1F63F5',
   motorcycle: '#D97706',
   bus: '#16A34A',
   truck: '#EA580C',
 };
 
 const DEPARTMENT_FIXED: Record<string, string> = {
-  POLICE: '#1E4DB7',
+  POLICE: '#1F63F5',
   HEALTH: '#16A34A',
   GSRTC: '#D97706',
   PANCHAYAT: '#7C3AED',
@@ -170,4 +173,4 @@ export function departmentColour(code: string | null | undefined): string {
   return DEPARTMENT_CYCLE[h % DEPARTMENT_CYCLE.length];
 }
 
-export const CHART_SERIES = ['#1E4DB7', '#0EA5E9', '#16A34A', '#D97706', '#7C3AED', '#DB2777', '#0891B2', '#CA8A04'];
+export const CHART_SERIES = ['#1F63F5', '#0EA5E9', '#16A34A', '#D97706', '#7C3AED', '#DB2777', '#0891B2', '#CA8A04'];

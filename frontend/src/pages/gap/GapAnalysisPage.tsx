@@ -119,7 +119,7 @@ export function GapAnalysisPage() {
       </Card>
 
       <div className="sg-grid sg-grid-6" style={{ marginBottom: 12 }}>
-        <KpiTile label="Cameras analysed" value={s.cameras_total} colour="#1E4DB7" footer={`${s.with_location} with coordinates · ${fmtPct(s.online_pct, 0)} online`} />
+        <KpiTile label="Cameras analysed" value={s.cameras_total} colour="#1F63F5" footer={`${s.with_location} with coordinates · ${fmtPct(s.online_pct, 0)} online`} />
         <KpiTile label="Districts covered" value={`${s.districts_with_cameras} / ${s.districts_total}`} colour="#0EA5E9" footer="of Gujarat's districts" />
         <KpiTile label="Zero-coverage cells" value={s.zero_coverage_cells} colour="#DC2626" footer={`${g.params.grid_m} m grid, ${g.params.coverage_radius_m} m radius`} />
         <KpiTile label="Uncovered POIs" value={s.uncovered_pois} colour="#DB2777" footer={`no camera within ${g.params.poi_radius_m} m`} />

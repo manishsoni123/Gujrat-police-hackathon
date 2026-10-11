@@ -21,7 +21,7 @@ export function LogoMark({ size = 32 }: { size?: number }) {
         strokeLinejoin="round"
       />
       <path d="M17 33 C21 25 27 21 32 21 C37 21 43 25 47 33 C43 41 37 45 32 45 C27 45 21 41 17 33 Z" fill="#FFFFFF" />
-      <circle cx="32" cy="33" r="6.5" fill="#1E4DB7" />
+      <circle cx="32" cy="33" r="6.5" fill="#1F63F5" />
       <circle cx="34" cy="31" r="2" fill="#FFFFFF" />
     </svg>
   );

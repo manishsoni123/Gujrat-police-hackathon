@@ -181,7 +181,7 @@ export function RoutePage() {
       ) : (
         <div>
           <div className="sg-grid sg-grid-4" style={{ marginBottom: 12 }}>
-            <KpiTile label="Stops" value={r.sightings.length} colour="#1E4DB7" footer={`${r.cameras_count} distinct camera${r.cameras_count === 1 ? '' : 's'} · one map marker per camera`} />
+            <KpiTile label="Stops" value={r.sightings.length} colour="#1F63F5" footer={`${r.cameras_count} distinct camera${r.cameras_count === 1 ? '' : 's'} · one map marker per camera`} />
             <KpiTile label="Distance" value={fmtKm(r.total_distance_km)} colour="#0EA5E9" footer="straight-line legs" />
             <KpiTile label="Duration" value={fmtMinutes(r.total_duration_min)} colour="#16A34A" footer="first to last sighting" />
             <KpiTile label="Plausibility flags" value={r.flags.length} colour={r.flags.length ? '#D97706' : '#16A34A'} footer={r.flags.length ? 'review legs marked amber' : 'all legs plausible'} />
@@ -190,7 +190,7 @@ export function RoutePage() {
             <Card size="small" title="Movement map" styles={{ body: { padding: 8 } }}>
               <BaseMap height={420}>
                 {points.length ? <FitBounds points={points} fitKey={r.plate + r.sightings.length} /> : null}
-                {points.length > 1 ? <Polyline positions={points} pathOptions={{ color: '#1E4DB7', weight: 3, opacity: 0.85, dashArray: '2 6' }} /> : null}
+                {points.length > 1 ? <Polyline positions={points} pathOptions={{ color: '#1F63F5', weight: 3, opacity: 0.85, dashArray: '2 6' }} /> : null}
                 {cameraStops.map((g) => (
                   <Marker key={g.key} position={[g.camera.lat as number, g.camera.lon as number]} icon={numberedIcon(g.label, g.fuzzy, g.stops.length)} eventHandlers={{ click: () => setSelected(g.stops[0].seq) }}>
                     <Popup>

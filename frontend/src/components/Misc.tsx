@@ -11,10 +11,10 @@ export function ConfidenceBar({ value, width = 90 }: { value: number | null | un
   return (
     <Tooltip title={`Confidence ${pct} %`}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-        <div style={{ width, height: 6, background: '#E5E7EB', borderRadius: 3, overflow: 'hidden', flex: 'none' }} aria-hidden>
+        <div style={{ width, height: 6, background: '#E5E5E5', borderRadius: 3, overflow: 'hidden', flex: 'none' }} aria-hidden>
           <div style={{ width: `${pct}%`, height: '100%', background: colour }} />
         </div>
-        <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: '#374151', minWidth: 38, whiteSpace: 'nowrap' }}>{pct} %</span>
+        <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12, color: '#404040', minWidth: 38, whiteSpace: 'nowrap' }}>{pct} %</span>
       </div>
     </Tooltip>
   );

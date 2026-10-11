@@ -89,7 +89,7 @@ export function MapPage() {
         </div>
         <img src="/media/snapshots/cam_${c.id}.jpg?t=${Math.floor(Date.now() / 1000)}" alt="" onerror="this.style.display='none'" style="width:100%;height:120px;object-fit:cover;border-radius:6px;background:#0b0f19;margin:4px 0" />
         <div style="display:flex;gap:8px;margin-top:6px">
-          <a href="/cameras/${c.id}" data-nav="/cameras/${c.id}" style="flex:1;text-align:center;background:#1E4DB7;color:#fff;padding:5px 8px;border-radius:6px;font-weight:500;text-decoration:none">View live</a>
+          <a href="/cameras/${c.id}" data-nav="/cameras/${c.id}" style="flex:1;text-align:center;background:#1F63F5;color:#fff;padding:5px 8px;border-radius:6px;font-weight:500;text-decoration:none">View live</a>
           <a href="/cameras?open=${c.id}" data-nav="/cameras?open=${c.id}" style="flex:1;text-align:center;border:1px solid #E5E7EB;padding:5px 8px;border-radius:6px;color:#111827;text-decoration:none">Details</a>
         </div>
       </div>`;
@@ -111,7 +111,7 @@ export function MapPage() {
   }, [navigate]);
 
   const districtStyle = useCallback(() => ({ color: '#0B1F3A', weight: 1, fillColor: '#0B1F3A', fillOpacity: 0.04 }), []);
-  const coverageStyle = useCallback(() => ({ color: '#1E4DB7', weight: 1, fillColor: '#1E4DB7', fillOpacity: 0.15 }), []);
+  const coverageStyle = useCallback(() => ({ color: '#1F63F5', weight: 1, fillColor: '#1F63F5', fillOpacity: 0.15 }), []);
   const gapStyle = useCallback(() => ({ color: '#DC2626', weight: 0.5, fillColor: '#DC2626', fillOpacity: 0.25 }), []);
   const poiToLayer = useCallback(
     (feature: GeoFeatureCollection['features'][number], latlng: L.LatLng) =>

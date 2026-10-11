@@ -319,24 +319,24 @@ export function AppLayout() {
       >
         {/* Flex column: fixed logo, scrollable navigation, collapse bar in normal flow (never covers a menu item). */}
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', padding: collapsed ? '0 16px' : '0 20px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', padding: collapsed ? '0 16px' : '0 20px', borderBottom: '1px solid #E5E5E5' }}>
             <Link to="/dashboard" aria-label="Sentinel Gujarat home" style={{ display: 'flex', alignItems: 'center' }}>
-              {collapsed ? <LogoMark size={30} /> : <Logo size={30} />}
+              {collapsed ? <LogoMark size={30} /> : <Logo size={30} colour="#0A0A0A" />}
             </Link>
           </div>
           <nav className="sg-sider-scroll" aria-label="Main navigation" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
-            <Menu theme="dark" mode="inline" selectedKeys={[selectedKey]} items={menuItems} onClick={({ key }) => navigate(key)} style={{ borderInlineEnd: 0 }} />
+            <Menu theme="light" mode="inline" selectedKeys={[selectedKey]} items={menuItems} onClick={({ key }) => navigate(key)} style={{ borderInlineEnd: 0 }} />
           </nav>
-          <div style={{ flexShrink: 0, padding: '6px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: '#0B1F3A' }}>
-            <Button type="text" block icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} style={{ color: 'rgba(255,255,255,0.7)', justifyContent: collapsed ? 'center' : 'flex-start' }} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <div style={{ flexShrink: 0, padding: '6px 12px', borderTop: '1px solid #E5E5E5', background: '#FFFFFF' }}>
+            <Button type="text" block icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} style={{ color: '#737373', justifyContent: collapsed ? 'center' : 'flex-start' }} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               {collapsed ? null : 'Collapse'}
             </Button>
           </div>
         </div>
       </Sider>
       <Layout>
-        <Header style={{ display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 900, lineHeight: 'normal' }}>
-          <Button onClick={() => setSearchOpen(true)} icon={<SearchOutlined />} style={{ minWidth: 300, justifyContent: 'flex-start', color: '#6B7280', background: '#F3F4F6', borderColor: 'transparent' }} aria-label="Search plate or camera (Ctrl+K)">
+        <Header style={{ display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid #E5E5E5', position: 'sticky', top: 0, zIndex: 900, lineHeight: 'normal' }}>
+          <Button onClick={() => setSearchOpen(true)} icon={<SearchOutlined />} style={{ minWidth: 300, justifyContent: 'flex-start', color: '#737373', background: '#F5F5F5', borderColor: 'transparent' }} aria-label="Search plate or camera (Ctrl+K)">
             <span style={{ flex: 1, textAlign: 'left' }}>Search plate, camera, alert…</span>
             <kbd className="sg-kbd">Ctrl K</kbd>
           </Button>
@@ -352,8 +352,8 @@ export function AppLayout() {
             <WsStatusDot />
             <IstClock />
             <Tooltip title={soundOn ? 'Alert sound on' : 'Alert sound off'}>
-              <Button type="text" icon={<SoundOutlined style={{ color: soundOn ? '#1E4DB7' : '#9CA3AF' }} />} onClick={() => setSoundOn(!soundOn)} aria-label="Alert sound" aria-pressed={soundOn} style={{ paddingInline: 8 }}>
-                <span style={{ fontSize: 12, color: soundOn ? '#1E4DB7' : '#6B7280' }}>{soundOn ? 'Sound on' : 'Sound off'}</span>
+              <Button type="text" icon={<SoundOutlined style={{ color: soundOn ? '#1F63F5' : '#9CA3AF' }} />} onClick={() => setSoundOn(!soundOn)} aria-label="Alert sound" aria-pressed={soundOn} style={{ paddingInline: 8 }}>
+                <span style={{ fontSize: 12, color: soundOn ? '#1F63F5' : '#6B7280' }}>{soundOn ? 'Sound on' : 'Sound off'}</span>
               </Button>
             </Tooltip>
             <NotificationBell />
@@ -361,7 +361,7 @@ export function AppLayout() {
               <Button type="text" style={{ height: 40, paddingInline: 6 }} aria-label="User menu">
                 <Space size={8}>
                   <Badge dot={false}>
-                    <Avatar size={30} style={{ background: '#1E4DB7' }} icon={<UserOutlined />} />
+                    <Avatar size={30} style={{ background: '#1F63F5' }} icon={<UserOutlined />} />
                   </Badge>
                   <div style={{ textAlign: 'left', lineHeight: 1.1 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{user?.full_name ?? user?.username}</div>

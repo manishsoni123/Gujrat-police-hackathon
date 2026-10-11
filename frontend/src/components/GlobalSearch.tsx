@@ -122,7 +122,7 @@ export function GlobalSearch() {
               onMouseEnter={() => setActive(i)}
               style={{ cursor: 'pointer', padding: '10px 16px', background: i === active ? '#EEF3FF' : undefined }}
             >
-              <List.Item.Meta avatar={<span style={{ fontSize: 18, color: '#1E4DB7' }}>{it.icon}</span>} title={it.title} description={it.subtitle} />
+              <List.Item.Meta avatar={<span style={{ fontSize: 18, color: '#1F63F5' }}>{it.icon}</span>} title={it.title} description={it.subtitle} />
             </List.Item>
           )}
         />
