@@ -339,3 +339,46 @@ as `8G3O1NCO824`, `FSJO1NCO824`, `RGJO1VCOAZA` - never correctly.
 * Noted, not changed: §3.4 step 5 accepts a k=2 candidate whose second "district digit" is a
   letter when the regex can re-parse it as one digit + series (`GLOAE L2866` → `GJ0AEL2866`,
   district 0).
+
+## 9. 13 Oct 2026: tiled-detection merge (adopted), multi-frame fusion and YOLOX-m (rejected)
+
+**Tiled-detection merge.** A live overlay frame showed a synthetic bus plate (`IND GJ 30 MF 6066`,
+x ≈ 552-1018 of a 1280 px frame) boxed only from x ≈ 512 - exactly the left edge of the second
+768 px tile: a box cut at an interior tile edge won the old IoU ≥ 0.4 merge. The same cut explains
+the truncated anchor reads `01AB1234` (camera 1) and `GJ01AB1` (own gate) that broke the acceptance
+route checks. `TiledDetector` now marks tile boxes touching an interior tile edge as cut, suppresses
+duplicates greedily by IoU or containment, keeps the more complete box and moves a cut side out to
+its partner's uncut side (CONTRACT amendment 2026-10-13, §7.7). Deterministic replay with
+`anpr.tools.eval_synthetic` (cams 1-3 + own gate, ONNX detector, ensemble OCR, tiles 768,
+`ANPR_DETECT_WIDTH=1280`, `FRAME_WIDTH=0`), scored against `plates.json`:
+
+| Detector | Exact (of 32) | False reads | Truncated reads | cam 1 | cam 2 | cam 3 | own gate |
+|---|---|---|---|---|---|---|---|
+| old merge (faca195) | 19 | 32 | 26 | 3/8 | 7/8 | 6/8 | 3/8 |
+| **new merge** | **30** | **4** | **2** | **8/8** | 7/8 | 7/8 | **8/8** |
+| tiles off (`ANPR_DET_TILE=0`) | 19 | 1 | 1 | 3/8 | 7/8 | 6/8 | 3/8 |
+
+The two remaining misses read the bus plate full length as `GJ3OMF6066` (O/0 confusion).
+
+**Multi-frame fusion for parked plates - rejected.** 286 crops of the parked Tata on camera 81
+(true plate `GJ01WC0824`, ~61×15 px, ~19° tilt) were ECC-registered (affine/homography, native/×2/×4;
+median correlation 0.994, 0 rejected) and fused by mean, median, mean+unsharp and shift-and-add in
+windows of N = 4 … all, then read by PaddleOCR, cct_xs, the production ensemble, cct_s and
+mobile-vit, raw and rectified (4,080 fused OCR inputs). **No exact read in any configuration.**
+Fusion lowers the edit distance (cct_xs 5.9 → 2.8-3.4 at N ≥ 32) but converges on the same wrong
+glyphs (`GJ01NC0824` ×43, `GJ01WE0824` ×21) and raises valid-format wrong plates (ensemble 2.1 % vs
+0.7 % single; 15 % for N=4 shift-and-add ×2). Camera and car are both fixed, so crops differ by
+~0.08 px: there is no sub-pixel information to recover. A fused still is a cleaner image for a human
+reviewer, not an OCR input. Untested idea for later: a per-character combination of the two OCR
+engines (Paddle misses only the W, cct_xs only the C).
+
+**YOLOX-m vs YOLOX-s - not adopted.** On native frames of the eight Dynatech cameras (GPU, RTX 4050):
+YOLOX-s 33-38 ms/call, YOLOX-m 39-49 ms/call (incl. pre-processing). Same objects found on 7 of 8
+frames; YOLOX-m was more confident on the parked SUV (0.88 vs 0.75) and motorcycles (0.92/0.85 vs
+0.88/0.80) but less on Dynatech 1 (0.41 vs 0.75), relabelled a truck-classified SUV as car 0.35, and
+added a duplicate `truck 0.53` box on Dynatech 5. Not a clear win for +25 % cost; YOLOX-s stays.
+
+**Own cameras.** Dynatech 1-4 (`192.168.173.45-48`) also serve a 1920×1080 H.265 main stream on
+`unicaststream/1` (the registered `/2` is 704×576 H.264); the registry now uses `/1`. Dynatech 5-8
+deliver 2560×1440 H.265 on `/2`. The parked-Tata plate on camera 81 / Dynatech 5 stays unreadable
+(≈ 5 px per character) - the fix is camera placement or zoom, not preprocessing (§8, above).
