@@ -6,16 +6,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Badge, Button, Card, Descriptions, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
-import { EditOutlined, TagOutlined, UnorderedListOutlined, WifiOutlined } from '@ant-design/icons';
+import { Alert, Badge, Button, Card, Descriptions, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
+import { EditOutlined, ReloadOutlined, TagOutlined, UnorderedListOutlined, WifiOutlined } from '@ant-design/icons';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader } from '@/components/PageHeader';
 import { StreamPlayer, type ActiveMode } from '@/components/StreamPlayer';
 import { camerasApi, detectionsApi, eventsApi, objectsApi } from '@/api';
-import type { Detection, EventItem } from '@/api/types';
+import { errorMessage } from '@/api/client';
+import type { Camera, Detection, EventItem } from '@/api/types';
 import { useReadsSocket } from '@/ws/useReadsSocket';
 import { useHealthSocket } from '@/ws/useHealthSocket';
-import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolTag, AmcTag, LocationConfidenceTag, WatchlistHitTag, codecLabel } from '@/components/Tags';
+import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolTag, AmcTag, LocationConfidenceTag, WatchlistHitTag, AnprTag, codecLabel } from '@/components/Tags';
 import { rowProps } from '@/hooks/useListQuery';
 import { IstTime } from '@/components/IstTime';
 import { PlateText } from '@/components/PlateText';
@@ -139,7 +140,13 @@ export function CameraDetailPage() {
   const navigate = useNavigate();
   const canWrite = usePermission('cameras.write');
   const canEvent = usePermission('events.write');
-  const cam = useQuery({ queryKey: ['cameras', 'detail', cameraId], queryFn: () => camerasApi.get(cameraId), enabled: Number.isFinite(cameraId) });
+  // An ANPR camera is re-read every 30 s so the ANPR pill follows the worker (reconnecting, queued, worker gone).
+  const cam = useQuery({
+    queryKey: ['cameras', 'detail', cameraId],
+    queryFn: () => camerasApi.get(cameraId),
+    enabled: Number.isFinite(cameraId),
+    refetchInterval: (q) => (q.state.data?.anpr_enabled ? 30_000 : false),
+  });
   const seedReads = useQuery({ queryKey: ['detections', 'camera', cameraId, 'seed'], queryFn: () => detectionsApi.list({ camera_id: cameraId, page_size: 30 }), enabled: Number.isFinite(cameraId) });
   const events = useQuery({ queryKey: ['events', 'camera', cameraId], queryFn: () => eventsApi.list({ camera_id: cameraId, page_size: 50 }), enabled: Number.isFinite(cameraId) });
   const ws = useReadsSocket(Number.isFinite(cameraId) ? cameraId : null);
@@ -147,6 +154,10 @@ export function CameraDetailPage() {
   const [mode, setMode] = useState<ActiveMode | null>(null);
   const [eventOpen, setEventOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  // The edit modal works on the camera as it was when the modal opened: CameraForm re-seeds every field
+  // whenever its `camera` prop changes, so handing it the live query data would wipe unsaved edits on
+  // every 30 s ANPR re-read above (last_seen_at, reads_24h, uptime change each time) or health refetch.
+  const [editCamera, setEditCamera] = useState<Camera | null>(null);
   const [tab, setTab] = useState('reads');
   const [detections, setDetections] = useState(readDetectionsPref);
   const toggleDetections = (on: boolean) => {
@@ -175,9 +186,11 @@ export function CameraDetailPage() {
   }, [ws.events, events.data]);
 
   if (cam.isLoading) return <PageSkeleton cards={2} />;
-  if (cam.isError) return <ErrorState error={cam.error} onRetry={() => void cam.refetch()} />;
   const c = cam.data;
-  if (!c) return null;
+  // Full-page error only when nothing has loaded. A failed background re-read (30 s ANPR poll, health
+  // invalidation) keeps `data` but flips `isError`: replacing the page then would unmount the stream
+  // (WHEP re-dial) and an open edit modal (unsaved edits lost), so keep the last good camera on screen.
+  if (!c) return cam.isError ? <ErrorState error={cam.error} onRetry={() => void cam.refetch()} /> : null;
 
   return (
     <div>
@@ -191,7 +204,7 @@ export function CameraDetailPage() {
             <MaintenanceTag status={c.maintenance_status} size="small" />
             <DepartmentTag code={c.department_code} name={c.department_name} size="small" />
             <CodecTag codec={c.codec} />
-            {c.anpr_enabled ? <Tag color="blue" style={{ margin: 0 }}>ANPR live</Tag> : null}
+            <AnprTag status={c.anpr_status} enabled={c.anpr_enabled} size="small" />
             {c.record_enabled ? <Tag style={{ margin: 0 }}>REC 12 h</Tag> : null}
             <span style={{ color: '#6B7280' }}>
               #{c.external_id} · {c.district ?? '—'} {c.police_station ? `· ${c.police_station}` : ''}
@@ -212,13 +225,34 @@ export function CameraDetailPage() {
               </Button>
             ) : null}
             {canWrite ? (
-              <Button type="primary" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
+              <Button
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={() => {
+                  setEditCamera(c);
+                  setEditOpen(true);
+                }}
+              >
                 Edit
               </Button>
             ) : null}
           </Space>
         }
       />
+      {cam.isRefetchError ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Could not refresh this camera; showing the last loaded details (status and ANPR state may be out of date)."
+          description={errorMessage(cam.error)}
+          action={
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => void cam.refetch()}>
+              Retry
+            </Button>
+          }
+        />
+      ) : null}
       <div className="sg-grid sg-camera-layout">
         <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
           <StreamPlayer
@@ -317,7 +351,7 @@ export function CameraDetailPage() {
         </Card>
       </div>
       <EventForm open={eventOpen} onClose={() => setEventOpen(false)} cameraId={c.id} />
-      <CameraForm open={editOpen} onClose={() => setEditOpen(false)} camera={c} />
+      <CameraForm open={editOpen} onClose={() => setEditOpen(false)} camera={editCamera ?? c} />
     </div>
   );
 }

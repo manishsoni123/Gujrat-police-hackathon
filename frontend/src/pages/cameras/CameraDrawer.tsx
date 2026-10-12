@@ -6,7 +6,7 @@ import { Button, DatePicker, Descriptions, Drawer, Form, Input, Modal, Select, S
 import { DeleteOutlined, EditOutlined, PlayCircleOutlined, ToolOutlined } from '@ant-design/icons';
 import { camerasApi, detectionsApi, eventsApi } from '@/api';
 import type { Camera, CameraDetail, MaintenanceUpdate } from '@/api/types';
-import { AmcTag, BoolTag, CodecTag, DepartmentTag, LocationConfidenceTag, MaintenanceTag, StatusTag, EventTypeTag, codecLabel } from '@/components/Tags';
+import { AmcTag, AnprTag, BoolTag, CodecTag, DepartmentTag, LocationConfidenceTag, MaintenanceTag, StatusTag, EventTypeTag, codecLabel } from '@/components/Tags';
 import { rowProps } from '@/hooks/useListQuery';
 import { IstTime } from '@/components/IstTime';
 import { maskUrlCredentials } from '@/utils/url';
@@ -105,7 +105,7 @@ export function CameraDrawer({ cameraId, onClose, onEdit }: CameraDrawerProps) {
             <StatusTag status={c.status} live={c.live} />
             <MaintenanceTag status={c.maintenance_status} size="small" />
             <CodecTag codec={c.codec} />
-            {c.anpr_enabled ? <Tag color="blue" style={{ margin: 0 }}>ANPR</Tag> : null}
+            <AnprTag status={c.anpr_status} enabled={c.anpr_enabled} size="small" />
             {c.record_enabled ? <Tag style={{ margin: 0 }}>REC</Tag> : null}
           </Space>
         ) : (

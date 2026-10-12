@@ -139,6 +139,15 @@ export interface StreamProbe {
   duration_ms: number | null;
 }
 
+/**
+ * What the live ANPR worker really does with a camera (CONTRACT Amendments 2026-10-13), as opposed to
+ * `anpr_enabled` (what the operator asked for): `off` = not handed to the worker (disabled, retired or no source URL);
+ * `live` / `starting` / `reconnecting` = a live worker with a fresh heartbeat lists it in that decoder state;
+ * `queued` = enabled but no live worker lists it (over `ANPR_MAX_CAMERAS`, lowest ids first);
+ * `no_worker` = enabled and no live worker heartbeat at all.
+ */
+export type AnprStatus = 'off' | 'live' | 'starting' | 'reconnecting' | 'queued' | 'no_worker';
+
 export interface Camera extends CameraSummary {
   source: CameraSource;
   /** Only on the POST/PUT /cameras response; null when nothing was probed. */
@@ -167,6 +176,8 @@ export interface Camera extends CameraSummary {
   nvr_id: string | null;
   onvif_host: string | null;
   anpr_enabled: boolean;
+  /** Real live-ANPR processing state (list/detail responses); absent or null when the server did not compute it. */
+  anpr_status?: AnprStatus | null;
   record_enabled: boolean;
   last_seen_at: string | null;
   last_status_change_at: string | null;

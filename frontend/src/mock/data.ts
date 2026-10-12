@@ -210,6 +210,8 @@ function makeCamera(r: Row): Camera {
     nvr_id: `NVR-${district.slice(0, 3).toUpperCase()}-${String(id).padStart(2, '0')}`,
     onvif_host: null,
     anpr_enabled: anpr,
+    // the degraded camera shows the worker reconnecting; every other enabled camera is processed
+    anpr_status: !anpr ? 'off' : id === 5 ? 'reconnecting' : 'live',
     record_enabled: anpr,
     location_confidence: null,
     metadata: null,
