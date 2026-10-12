@@ -27,6 +27,7 @@ from app.services.mediamtx_client import client as mtx
 from app.services.mediamtx_client import relay_path
 from app.services.report_builder import build_csv, rows_hash, store_report
 from app.services.scope import camera_conditions, scoped_camera
+from app.services.source_probe import detect_stream_format
 
 router = APIRouter(tags=["cameras"])
 
@@ -176,7 +177,10 @@ async def import_template():
 
 
 @router.post("/cameras", status_code=201, dependencies=[Depends(require_permission("cameras.write"))])
-async def create_camera(body: CameraCreate, user: CurrentUser, db: DbDep, request: Request):
+async def create_camera(
+    body: CameraCreate, user: CurrentUser, db: DbDep, request: Request,
+    probe: bool = Query(True, description="probe the source once and store the detected codec/resolution/fps"),
+):
     scope = user_scope(user)
     source = body.source or "manual"
     raw = body.model_dump(exclude_unset=True, exclude={"source"})
@@ -189,9 +193,24 @@ async def create_camera(body: CameraCreate, user: CurrentUser, db: DbDep, reques
         raise validation_error("Invalid camera", [e.as_dict(bulk=True) for e in outcome.errors])
     cam = outcome.touched[0]
     await db.refresh(cam)
+    stream_probe = await _probe_and_apply(db, cam) if probe else None
     await serializers.warm(db)
-    set_audit(request, entity="camera", entity_id=cam.id, after={**serializers.camera_diff(cam), "relay_paths_created": outcome.relay_paths_created, "warnings": [w.as_dict(True) for w in outcome.warnings]})
-    return serializers.camera_full(cam, user.role == "admin")
+    set_audit(request, entity="camera", entity_id=cam.id, after={**serializers.camera_diff(cam), "relay_paths_created": outcome.relay_paths_created, "warnings": [w.as_dict(True) for w in outcome.warnings], "stream_probe": stream_probe})
+    return {**serializers.camera_full(cam, user.role == "admin"), "stream_probe": stream_probe}
+
+
+async def _probe_and_apply(db: AsyncSession, cam: Camera) -> dict[str, Any] | None:
+    """Save-time format detection: probe the source, store what it reports, then re-apply the relay paths so an
+    H.265 / B-frame source gets its `_h264` re-encode. Unchanged paths are left alone by `ensure_camera_paths`."""
+    report = await detect_stream_format(cam)
+    if report is None:
+        return None
+    cam.updated_at = utcnow()
+    await db.commit()
+    await db.refresh(cam)
+    if cam.status != "retired":
+        await mtx.ensure_camera_paths(cam)
+    return report
 
 
 @router.get("/cameras/{camera_id}", dependencies=[Depends(require_permission("cameras.read"))])
@@ -215,7 +234,10 @@ async def get_camera(camera_id: int, user: CurrentUser, db: DbDep):
 
 
 @router.put("/cameras/{camera_id}", dependencies=[Depends(require_permission("cameras.write"))])
-async def update_camera(camera_id: int, body: CameraUpdate, user: CurrentUser, db: DbDep, request: Request):
+async def update_camera(
+    camera_id: int, body: CameraUpdate, user: CurrentUser, db: DbDep, request: Request,
+    probe: bool = Query(True, description="when the source URL changes, probe it and store the detected codec/resolution/fps"),
+):
     cam = await _get_scoped(db, user, camera_id)
     await serializers.warm(db)
     before = serializers.camera_diff(cam)
@@ -252,6 +274,7 @@ async def update_camera(camera_id: int, body: CameraUpdate, user: CurrentUser, d
         raise validation_error("Invalid camera", [i.as_dict(bulk=True) for i in issues])
     assert parsed is not None
     relay_changed = False
+    source_changed = False
     for k in data:
         if k in ("department_id", "department_code"):
             continue
@@ -262,6 +285,7 @@ async def update_camera(camera_id: int, body: CameraUpdate, user: CurrentUser, d
         if getattr(cam, attr) != new:
             if k in ("rtsp_url", "codec", "record_enabled", "anpr_enabled"):
                 relay_changed = True
+            source_changed = source_changed or k == "rtsp_url"
             setattr(cam, attr, new)
     if new_dept_id is not None and cam.department_id != new_dept_id:
         cam.department_id = new_dept_id
@@ -281,9 +305,13 @@ async def update_camera(camera_id: int, body: CameraUpdate, user: CurrentUser, d
             relay_info = {"relay_paths_created": sum(1 for r in results if r.ok), "relay_paths_failed": sum(1 for r in results if not r.ok)}
         else:
             await mtx.remove_camera_paths(cam.id)
+    # only a new source URL is probed: a codec typed on its own is an explicit override and stays
+    stream_probe = await _probe_and_apply(db, cam) if probe and source_changed and cam.rtsp_url else None
+    if stream_probe is not None:
+        relay_info["stream_probe"] = stream_probe
     after = serializers.camera_diff(cam)
     set_audit(request, entity="camera", entity_id=cam.id, before={k: v for k, v in before.items() if after.get(k) != v}, after={**{k: v for k, v in after.items() if before.get(k) != v}, **relay_info})
-    return serializers.camera_full(cam, user.role == "admin")
+    return {**serializers.camera_full(cam, user.role == "admin"), "stream_probe": stream_probe}
 
 
 @router.delete("/cameras/{camera_id}", status_code=204, dependencies=[Depends(require_permission("cameras.write"))])

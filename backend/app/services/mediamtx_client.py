@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.stream_source import ffprobe_input_args, source_kind
 
 log = logging.getLogger("sentinel.mediamtx")
 
@@ -220,12 +221,14 @@ def on_demand_start_timeout_s(rtsp_url: str | None) -> int:
 
 def source_path_body(rtsp_url: str, record: bool, persistent: bool = False) -> dict[str, Any]:
     """`cam_<id>` config (§8.3). `persistent=True` → `sourceOnDemand: false` (the relay keeps one upstream
-    connection and reconnects itself); otherwise on demand with the 10-minute close-after."""
-    body = {
+    connection and reconnects itself); otherwise on demand with the 10-minute close-after. The source may be any
+    scheme MediaMTX pulls (`stream_source.SOURCE_KINDS`); `rtspTransport` only applies to an RTSP source."""
+    body: dict[str, Any] = {
         "source": rtsp_url,
         "sourceOnDemandStartTimeout": f"{on_demand_start_timeout_s(rtsp_url)}s",
-        "rtspTransport": "tcp",
     }
+    if source_kind(rtsp_url) == "rtsp":
+        body["rtspTransport"] = "tcp"
     body.update(relay_policy_body(PERSISTENT if persistent else ON_DEMAND))
     body.update(_record_block(record))
     return body
@@ -434,10 +437,11 @@ class MediaMtxClient:
 
 
 async def ffprobe_ok(rtsp_url: str, timeout_s: float | None = None) -> bool:
-    """Active probe: `ffprobe -rtsp_transport tcp` on the relay path; True when a video stream is found."""
+    """Active probe of the relay path or a directly probed source (RTSP over TCP, RTMP, SRT, HLS); True when a
+    video stream is found."""
     timeout_s = timeout_s or settings.HEALTH_PROBE_TIMEOUT_S
     cmd = [
-        "ffprobe", "-v", "error", "-rtsp_transport", "tcp", "-timeout", str(int(timeout_s * 1_000_000)),
+        "ffprobe", "-v", "error", *ffprobe_input_args(rtsp_url, timeout_s),
         "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "json", rtsp_url,
     ]
     try:

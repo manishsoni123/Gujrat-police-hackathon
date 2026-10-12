@@ -11,6 +11,7 @@ from typing import Any
 
 from app.adapters.base import CameraSourceAdapter, ProbeResult, SourceCamera
 from app.core.config import settings
+from app.core.stream_source import ffprobe_input_args
 
 CODEC_NAMES = {"h264": "H264", "hevc": "H265", "h265": "H265", "mjpeg": "MJPEG"}
 # ffprobe/ffmpeg answers that mean "the server answered and said no" (a camera that is not there / not allowed),
@@ -61,12 +62,14 @@ def _int_or_none(value: Any) -> int | None:
 
 
 async def ffprobe_details(rtsp_url: str, timeout_s: float | None = None, secrets: tuple[str, ...] = ()) -> ProbeResult:
-    """`ffprobe -rtsp_transport tcp` → codec, resolution, sane fps, duration. Every error string is scrubbed of
-    URL passwords and of `secrets` before it leaves this function (ffmpeg echoes the input URL in messages)."""
+    """ffprobe (RTSP over TCP, or RTMP/SRT/HLS with `ffprobe_input_args`) → codec, resolution, sane fps, duration.
+    Every error string is scrubbed of URL passwords and of `secrets` before it leaves this function (ffmpeg
+    echoes the input URL in messages). A WHEP source cannot be probed directly (no WebRTC client in ffprobe);
+    callers probe its relay path instead."""
     timeout_s = timeout_s or settings.HEALTH_PROBE_TIMEOUT_S
     started = time.perf_counter()
     cmd = [
-        "ffprobe", "-v", "error", "-rtsp_transport", "tcp", "-timeout", str(int(timeout_s * 1_000_000)),
+        "ffprobe", "-v", "error", *ffprobe_input_args(rtsp_url, timeout_s),
         "-select_streams", "v:0", "-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,profile,has_b_frames",
         "-of", "json", rtsp_url,
     ]

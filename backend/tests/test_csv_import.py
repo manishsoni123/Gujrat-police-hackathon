@@ -75,7 +75,7 @@ def test_row_validation_rules() -> None:
     _, issues = validate_row({**base, "lat": "23.2"}, 2, None)
     assert issues and issues[0].field == "lat" and "both" in issues[0].message
 
-    _, issues = validate_row({**base, "rtsp_url": "http://x"}, 3, None)
+    _, issues = validate_row({**base, "rtsp_url": "ftp://x"}, 3, None)
     assert issues[0].field == "rtsp_url"
 
     _, issues = validate_row({**base, "type": "thermal"}, 4, None)

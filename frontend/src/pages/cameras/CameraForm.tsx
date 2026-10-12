@@ -30,6 +30,9 @@ interface CameraFormProps {
 
 type FormValues = Omit<CameraImportRow, 'install_date' | 'amc_expiry'> & { install_date?: dayjs.Dayjs | null; amc_expiry?: dayjs.Dayjs | null };
 
+// Same schemes as backend app/core/stream_source.py SOURCE_KINDS
+const SOURCE_URL_RE = /^(rtsps?|rtmps?|srt|https?|wheps?):\/\/./i;
+
 const ENUM = {
   type: ['analog', 'ip', 'ptz', 'dome', 'bullet', 'anpr', 'other'],
   ownership: [{ value: 'govt_dept', label: 'Government department' }, { value: 'private', label: 'Private (society / business)' }, { value: 'public_facing', label: 'Public-facing' }],
@@ -89,6 +92,13 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
     },
     onSuccess: (c) => {
       message.success(editing ? 'Camera updated' : `Camera "${c.name}" added and relay path ${c.relay_path ?? ''} created`);
+      const p = c.stream_probe;
+      if (p?.ok) {
+        const corrected = p.codec_corrected_from ? ` (codec corrected from ${p.codec_corrected_from})` : '';
+        message.info(`Stream detected: ${p.codec ?? 'unknown codec'} ${p.resolution ?? ''}${corrected}${p.transcode ? ' - converted to H.264 for browsers' : ''}`, 6);
+      } else if (p) {
+        message.warning(`Saved, but the stream could not be opened: ${p.error ?? 'no video'}. Check the URL, login and network.`, 8);
+      }
       qc.invalidateQueries({ queryKey: ['cameras'] });
       qc.invalidateQueries({ queryKey: ['geo'] });
       onSaved?.(c);
@@ -220,8 +230,8 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
               children: (
                 <Row gutter={16}>
                   <Col span={14}>
-                    <Form.Item name="rtsp_url" label="RTSP URL" {...fe('rtsp_url')} extra="rtsp:// or rtsps://; credentials allowed. The relay pulls this over TCP on demand." rules={[{ pattern: /^rtsps?:\/\//, message: 'Must start with rtsp:// or rtsps://' }]}>
-                      <Input placeholder="rtsp://mediamtx:8554/own_gate" />
+                    <Form.Item name="rtsp_url" label="Stream URL" {...fe('rtsp_url')} extra="rtsp(s)://, rtmp(s)://, srt://, http(s)://…m3u8 (HLS) or whep(s):// (WebRTC); credentials allowed. Codec, resolution and fps are detected on save." rules={[{ pattern: SOURCE_URL_RE, message: 'Must start with rtsp://, rtsps://, rtmp://, rtmps://, srt://, http(s):// or whep(s)://' }]}>
+                      <Input placeholder="rtsp://user:password@192.168.1.10:554/stream1" />
                     </Form.Item>
                     <Row gutter={8}>
                       <Col span={8}>

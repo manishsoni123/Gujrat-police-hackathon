@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
+from app.core.stream_source import normalise_source_url
 from app.db.models import CAMERA_TYPES, CONNECTIVITY, LOCATION_CONFIDENCE, MAINTENANCE, OWNERSHIPS
 from app.schemas.common import ApiModel
 
@@ -238,9 +239,7 @@ class CameraImportRow(ApiModel):
     def _rtsp(cls, v: str | None) -> str | None:
         if v is None:
             return None
-        if not v.lower().startswith(("rtsp://", "rtsps://")):
-            raise ValueError("must start with rtsp:// or rtsps://")
-        return v
+        return normalise_source_url(v)
 
     @field_validator("whep_url", "hls_url")
     @classmethod

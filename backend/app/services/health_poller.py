@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.rbac import Scope
+from app.core.stream_source import probe_directly
 from app.core.tz import iso_z, utcnow
 from app.db.models import Alert, AnprWorker, Camera, CameraHealthLog, Event, PlateRead
 from app.db.session import SessionLocal
@@ -106,9 +107,10 @@ def probe_target(
       copy for the full 10-minute close-after, i.e. up to ~15 idle sandbox streams held on average at a 15-minute
       probe interval, which is why `direct` is the default ("open only what you process").
     Any other external source (vendor NVR, phone) keeps the earlier behaviour: probed directly with the cap.
+    A WHEP source cannot be probed by ffprobe, so it always goes through the relay path (cap + margin).
     """
     if rtsp_url and is_external_source(rtsp_url):
-        if source == "sandbox" and via == "relay":
+        if (source == "sandbox" and via == "relay") or not probe_directly(rtsp_url):
             return relay_rtsp_url(camera_id), float(external_timeout_s) + RELAY_START_MARGIN_S
         return rtsp_url, float(external_timeout_s)
     return relay_rtsp_url(camera_id), float(local_timeout_s)

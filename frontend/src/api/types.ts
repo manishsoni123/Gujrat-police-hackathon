@@ -125,8 +125,24 @@ export interface CameraSummary {
   type: CameraType;
 }
 
+/** Save-time format detection returned by POST/PUT /cameras (CONTRACT Amendments 2026-10-12). */
+export interface StreamProbe {
+  ok: boolean;
+  source_kind: 'rtsp' | 'rtmp' | 'srt' | 'hls' | 'whep' | null;
+  codec: Codec | null;
+  resolution: string | null;
+  fps: number | null;
+  b_frames: number | null;
+  transcode: boolean;
+  codec_corrected_from: Codec | null;
+  error: string | null;
+  duration_ms: number | null;
+}
+
 export interface Camera extends CameraSummary {
   source: CameraSource;
+  /** Only on the POST/PUT /cameras response; null when nothing was probed. */
+  stream_probe?: StreamProbe | null;
   ownership: Ownership;
   address: string | null;
   ward: string | null;

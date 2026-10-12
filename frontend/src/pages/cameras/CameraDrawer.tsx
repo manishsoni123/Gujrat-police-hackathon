@@ -200,7 +200,7 @@ export function CameraDrawer({ cameraId, onClose, onEdit }: CameraDrawerProps) {
                       <Descriptions.Item label="Stream">
                         {codecLabel(c.codec)} · {c.resolution ?? '—'} · {c.fps ?? '—'} fps
                       </Descriptions.Item>
-                      <Descriptions.Item label="RTSP URL" span={2}>
+                      <Descriptions.Item label="Stream URL" span={2}>
                         <code style={{ fontSize: 12, wordBreak: 'break-all' }} title="Credentials are always masked (user:***@host)">{c.rtsp_url ? maskUrlCredentials(c.rtsp_url) : '— (no stream URL: never checked, surfaces in gap report)'}</code>
                       </Descriptions.Item>
                       <Descriptions.Item label="Connectivity">
