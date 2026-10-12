@@ -416,8 +416,17 @@ services:
       WORKER_ID: ${ANPR_LIVE_WORKER_ID:-live-gpu}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    # Own caps, not the CPU twin's (CUDA runtime + onnxruntime-gpu add host RSS).
+    # Memory ~ 2 GiB + 0.45 GiB per simultaneous decoder (each `ffmpeg -hwaccel
+    # cuda` holds 0.29-0.44 GiB anon+shmem; deploy/.env.example). The 8g fallback
+    # matches this service's ANPR_MAX_CAMERAS default of 12 (2 + 12 x 0.45 = 7.4).
+    # CPU: 8 cameras used 4.6-5.7 cores on 12-13 Oct, so 12 cameras at 5 fps will
+    # be throttled at 6 (lower fps_actual, not a crash); cpus must be <= host CPUs.
     deploy:
       resources:
+        limits:
+          cpus: "${ANPR_LIVE_GPU_CPUS:-6}"
+          memory: ${ANPR_LIVE_GPU_MEMORY:-8g}
         reservations:
           devices:
             - driver: nvidia
@@ -448,8 +457,18 @@ services:
       WORKER_ID: ${ANPR_PREINDEX_WORKER_ID:-preindex-gpu}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    # Own caps: the CPU twin's laptop value (ANPR_PREINDEX_MEMORY=1536m) would OOM
+    # this worker (~2.5 GiB on 12 Oct with only 2 decoders: PREINDEX_MAX_CAMERAS=2,
+    # PREINDEX_SKIP_LIVE=1). Memory ~ 2 GiB + 0.45 GiB per simultaneous decoder =
+    # min(PREINDEX_MAX_CAMERAS, pre-index cameras). The 13g fallback covers ~24
+    # decoders (organiser VM: 30 cameras - 8 live + own gate = 23), NOT the
+    # 50-camera default above (~25 GiB, more than a 32 GiB VM has to spare):
+    # raise it or lower PREINDEX_MAX_CAMERAS when more pre-index cameras exist.
     deploy:
       resources:
+        limits:
+          cpus: "${ANPR_PREINDEX_GPU_CPUS:-3}"
+          memory: ${ANPR_PREINDEX_GPU_MEMORY:-13g}
         reservations:
           devices:
             - driver: nvidia
