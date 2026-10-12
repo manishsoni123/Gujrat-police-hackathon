@@ -222,14 +222,14 @@ def tile_grid(width: int, height: int, tile: int, overlap: float) -> list[tuple[
     return [(x, y, min(tile, width - x), min(tile, height - y)) for y in ys for x in xs]
 
 
-#: Duplicate rule kept from the first tiled detector: boxes overlapping by IoU >= 0.4 are one plate.
+#: Boxes overlapping by IoU >= this are duplicates of one plate (the first tiled detector's rule).
 DUPLICATE_IOU = 0.4
-#: A box covering at least this much of the smaller box's area (intersection / smaller area) may be
-#: the same plate: a piece cut at a tile edge, or a partial box inside a complete one.
+#: A box covering at least this much of the smaller box's area (intersection / smaller area) may
+#: be the same plate: a piece cut at a tile edge, or a partial box inside a complete one.
 CONTAIN_IOS = 0.5
 #: ... provided the two boxes agree (1-D IoU >= this) on every axis on which neither is cut.
 AXIS_IOU = 0.5
-#: A tile box within this fraction of the tile size (min 4 px) of an interior tile edge may be cut there.
+#: A tile box this close to an interior tile edge (fraction of the tile, min 4 px) may be cut.
 TILE_EDGE_FRACTION = 0.02
 
 
@@ -255,11 +255,11 @@ def _iou_1d(a0: int, a1: int, b0: int, b1: int) -> float:
 class TileBox:
     """A detector box in frame pixels plus what the tiling knows about it.
 
-    ``cut`` lists the sides (``l``/``r``/``t``/``b``) lying on an *interior* tile edge (one that is
-    not a frame edge): the plate may continue beyond that side in a neighbouring tile, so the side
-    is not trusted. ``oversized`` marks a plate-shaped tile box wider than half its tile; it is
-    never kept on its own (see :class:`TiledDetector`), only as part of a group with a box that
-    passes the size limit - typically completing a piece of the same plate cut at a tile edge.
+    ``cut`` lists the sides (``l``/``r``/``t``/``b``) lying on an *interior* tile edge (one that
+    is not a frame edge): the plate may continue beyond that side in a neighbouring tile, so the
+    side is not trusted. ``oversized`` marks a cut tile box wider than half its tile; it is never
+    kept on its own, only together with a plate-sized box of the same plate (see
+    :class:`TiledDetector`).
     """
 
     box: Box
@@ -275,8 +275,9 @@ class TileBox:
         return "t" in self.cut or "b" in self.cut
 
 
-def cut_sides(box: Box, tile: tuple[int, int, int, int], frame_w: int, frame_h: int, edge_px: int) -> str:
-    """Sides of ``box`` (frame px) within ``edge_px`` of an edge of ``tile`` that is inside the frame."""
+def cut_sides(box: Box, tile: tuple[int, int, int, int], frame_w: int, frame_h: int,
+              edge_px: int) -> str:
+    """Sides of ``box`` (frame px) within ``edge_px`` of an edge of ``tile`` inside the frame."""
     x, y, tw, th = tile
     sides = ""
     if x > 0 and box.x - x <= edge_px:
@@ -294,9 +295,9 @@ def same_plate(a: TileBox, b: TileBox) -> bool:
     """Whether two boxes show the same plate.
 
     Either they overlap by IoU >= :data:`DUPLICATE_IOU`, or one covers at least
-    :data:`CONTAIN_IOS` of the smaller one's area *and* they agree (1-D IoU >= :data:`AXIS_IOU`) on
-    every axis on which neither is cut, with at least one such axis. A cut box and the rest of its
-    plate disagree on the cut axis by construction; the agreeing other axis keeps a plate from
+    :data:`CONTAIN_IOS` of the smaller one's area *and* they agree (1-D IoU >= :data:`AXIS_IOU`)
+    on every axis on which neither is cut, with at least one such axis. A cut box and the rest of
+    its plate disagree on the cut axis by construction; the agreeing other axis keeps a plate from
     being swallowed by a large unrelated box that merely contains it.
     """
     pa, pb = a.box, b.box
@@ -316,48 +317,52 @@ def same_plate(a: TileBox, b: TileBox) -> bool:
     return checked
 
 
-def fuse(members: list[TileBox]) -> Box:
-    """One box for boxes of the same plate: their union, except that a cut side is ignored when
-    another member has an uncut side there (the cut box stops at the tile edge, the plate does not).
-    Confidence and source come from the most confident member.
-    """
-    def side(coord, outer, cut: str) -> int:
-        trusted = [coord(m.box) for m in members if cut not in m.cut]
-        return outer(trusted or [coord(m.box) for m in members])
+def absorb(kept: TileBox, dup: TileBox) -> TileBox:
+    """``kept`` after folding in ``dup``, a less confident box of the same plate.
 
-    x1 = side(lambda b: b.x, min, "l")
-    x2 = side(lambda b: b.x + b.w, max, "r")
-    y1 = side(lambda b: b.y, min, "t")
-    y2 = side(lambda b: b.y + b.h, max, "b")
-    if x2 <= x1 or y2 <= y1:  # cannot happen for overlapping members; fall back to the plain union
-        x1, y1 = min(m.box.x for m in members), min(m.box.y for m in members)
-        x2, y2 = max(m.box.x + m.box.w for m in members), max(m.box.y + m.box.h for m in members)
-    best = max(members, key=lambda m: m.box.confidence).box
-    return Box(x1, y1, x2 - x1, y2 - y1, best.confidence, best.source)
+    The more complete box gives the extents: ``kept`` (the more confident one) for an IoU
+    duplicate, the larger box when they matched by containment (IoU < :data:`DUPLICATE_IOU`: the
+    smaller one is a partial or cut box inside it). A cut side of that box then moves out to the
+    other box's side when the other box is not cut there and reaches at least as far - two pieces
+    cut on either side of the tile overlap become the whole plate. Sides are never widened
+    otherwise (no union of jittery duplicates). Confidence and source of the more confident box.
+    """
+    base, other = kept, dup
+    if iou(kept.box, dup.box) < DUPLICATE_IOU and dup.box.area > kept.box.area:
+        base, other = dup, kept
+    b, o = base.box, other.box
+    side = {"l": b.x, "t": b.y, "r": b.x + b.w, "b": b.y + b.h}
+    theirs = {"l": o.x, "t": o.y, "r": o.x + o.w, "b": o.y + o.h}
+    cut = base.cut
+    for s in base.cut:
+        reaches = theirs[s] <= side[s] if s in "lt" else theirs[s] >= side[s]
+        if s not in other.cut and reaches:
+            side[s] = theirs[s]
+            cut = cut.replace(s, "")
+    best = dup.box if dup.box.confidence > kept.box.confidence else kept.box
+    merged = Box(side["l"], side["t"], side["r"] - side["l"], side["b"] - side["t"],
+                 best.confidence, best.source)
+    return TileBox(merged, cut, kept.oversized and dup.oversized)
 
 
 def merge_boxes(candidates: list[TileBox]) -> list[Box]:
-    """Group the boxes of one frame by :func:`same_plate` (transitively) and :func:`fuse` each group.
+    """Duplicate suppression over one frame's boxes, most confident first (like the old NMS).
 
-    A group made only of ``oversized`` boxes is dropped; a cut box with no partner is kept as it is
-    (a truncated plate is still a vehicle). Result sorted by confidence, most confident first.
+    Each box is folded (:func:`absorb`) into the first kept box it is :func:`same_plate` with, or
+    kept itself. Grouping is not transitive: a box is compared with the kept boxes only, so a
+    blob over two neighbouring plates joins one of them instead of chaining them together. A kept
+    box made only of ``oversized`` boxes is dropped; a cut box with no partner is kept as it is (a
+    truncated plate is still a vehicle). Result sorted by confidence, most confident first.
     """
-    parent = list(range(len(candidates)))
-
-    def root(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    for i in range(len(candidates)):
-        for j in range(i + 1, len(candidates)):
-            if same_plate(candidates[i], candidates[j]):
-                parent[root(j)] = root(i)
-    groups: dict[int, list[TileBox]] = {}
-    for i, c in enumerate(candidates):
-        groups.setdefault(root(i), []).append(c)
-    merged = [fuse(g) for g in groups.values() if not all(m.oversized for m in g)]
+    kept: list[TileBox] = []
+    for cand in sorted(candidates, key=lambda t: -t.box.confidence):
+        for i, k in enumerate(kept):
+            if same_plate(k, cand):
+                kept[i] = absorb(k, cand)
+                break
+        else:
+            kept.append(cand)
+    merged = [k.box for k in kept if not k.oversized]
     merged.sort(key=lambda b: -b.confidence)
     return merged
 
@@ -371,33 +376,33 @@ class TiledDetector:
     raises the effective resolution by ``width / tile`` at the cost of one inference per tile
     (about 9 ms each on the laptop CPU); the whole-frame pass keeps near/large plates.
 
-    Boxes from tiles are dropped when they cannot be a plate (aspect ratio outside
-    0.12 <= h/w <= 0.9, or taller than half the tile - smeared night tiles occasionally yield one
-    full-tile box with a high score). A plate-shaped tile box wider than half its tile is
-    ``oversized``: never kept alone, but it completes a smaller box of the same plate - on 1280 px
-    synthetic frames the complete 470 px plate in one tile is oversized while the neighbouring
-    tile boxes only the piece right of its edge.
+    Tile boxes are dropped when they cannot be a plate: aspect ratio outside 0.12 <= h/w <= 0.9,
+    or taller than half the tile (smeared night tiles occasionally yield one full-tile box with a
+    high score). A plate crossing a tile edge is cut there: the tile on one side boxes only its
+    visible part, right up to the edge (or a few px short of it). Such a box used to survive next
+    to (or instead of) the complete box - their IoU is low - and fed partial strings to the voter
+    (``01AB1234``, ``GJ01AB1`` for ``GJ01AB1234``). Tile boxes within ``edge_px`` (default 2 % of
+    the tile, min 4 px) of an interior tile edge are therefore marked cut on that side, and
+    :func:`merge_boxes` folds boxes of the same plate (:func:`same_plate`: IoU >= 0.4, or
+    containment / a cut piece with agreeing extents on the uncut axis) into the most complete one
+    (:func:`absorb`): a cut piece inside the complete box gives way to it, two pieces cut on
+    either side of the overlap become the whole plate, a cut box with no partner is kept.
 
-    A plate crossing a tile edge is cut there: the tile on one side boxes only its visible part,
-    right up to the edge (or a few px short of it). Such a box used to survive next to (or instead
-    of) the complete box - their IoU is low - and fed partial strings to the voter (``01AB1234``,
-    ``GJ01AB1`` for ``GJ01AB1234``). Tile boxes within ``edge_px`` (default 2 % of the tile, min
-    4 px) of an interior tile edge are therefore marked cut on that side, and :func:`merge_boxes`
-    groups boxes of the same plate (:func:`same_plate`: IoU >= 0.4, or containment / a cut piece
-    with agreeing extents on the uncut axis) and replaces each group by one box (:func:`fuse`):
-    the union of the members, a cut side giving way to an uncut one. Two pieces cut on either
-    side of the tile overlap thus become the whole plate; a piece inside a complete box becomes
-    the complete box; a cut box with no partner is kept. The heartbeat keeps the inner detector's
-    name (``onnx``/``auto``/...).
+    A tile box wider than half its tile is kept like any other when it has no cut side - a near
+    plate in one tile (470-520 px on 1280 px synthetic frames, often missed by the whole-frame
+    pass). When it is also cut it is ``oversized``: a wide smear running into the neighbouring
+    tile, or a plate the merge can complete; it is kept only together with a plate-sized box of
+    the same plate. The heartbeat keeps the inner detector's name (``onnx``/``auto``/...).
     """
 
-    def __init__(self, inner: PlateDetector, tile: int, overlap: float = 0.15, whole_frame: bool = True,
-                 edge_px: int | None = None) -> None:
+    def __init__(self, inner: PlateDetector, tile: int, overlap: float = 0.15,
+                 whole_frame: bool = True, edge_px: int | None = None) -> None:
         self.inner = inner
         self.tile = int(tile)
         self.overlap = min(0.5, max(0.0, float(overlap)))
         self.whole_frame = bool(whole_frame)
-        self.edge_px = int(edge_px) if edge_px is not None else max(4, int(round(TILE_EDGE_FRACTION * self.tile)))
+        default_edge = max(4, int(round(TILE_EDGE_FRACTION * self.tile)))
+        self.edge_px = int(edge_px) if edge_px is not None else default_edge
         self.name = inner.name
 
     @property
@@ -418,16 +423,17 @@ class TiledDetector:
 
     def detect(self, image: np.ndarray) -> list[Box]:
         h, w = image.shape[:2]
-        found: list[TileBox] = [TileBox(b) for b in self.inner.detect(image)] if self.whole_frame else []
+        found = [TileBox(b) for b in self.inner.detect(image)] if self.whole_frame else []
         tiles = tile_grid(w, h, self.tile, self.overlap)
         if len(tiles) > 1:
-            for x, y, tw, th in tiles:
+            for tile in tiles:
+                x, y, tw, th = tile
                 for b in self.inner.detect(image[y:y + th, x:x + tw]):
                     if not self.plate_shaped(b) or b.h > 0.5 * th:
                         continue
                     fb = Box(b.x + x, b.y + y, b.w, b.h, b.confidence, b.source)
-                    found.append(TileBox(fb, cut_sides(fb, (x, y, tw, th), w, h, self.edge_px),
-                                         oversized=not self.plausible(b, tw, th)))
+                    cut = cut_sides(fb, tile, w, h, self.edge_px)
+                    found.append(TileBox(fb, cut, bool(cut) and not self.plausible(b, tw, th)))
         return merge_boxes(found)
 
 
