@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbDep, require_permission, user_scope
-from app.api.recordings import _segments
+from app.api.recordings import _segments, covering_segment
 from app.core.errors import ApiError, conflict, not_found, validation_error
 from app.core.hashing import abs_path, write_stream_hashed
 from app.core.tz import parse_iso, utcnow
@@ -57,13 +57,11 @@ async def create_clip(body: ClipCreate, user: CurrentUser, db: DbDep, request: R
     if not path or not cam.record_enabled:
         raise conflict("No recording is available for this camera (recording is not enabled)")
     segs = _segments(await playback_list(path, start - timedelta(minutes=2), start + timedelta(seconds=body.duration_s)), path)
-    # 1 s tolerance: MediaMTX reports segment starts with microseconds while the API renders (and clients echo)
-    # millisecond precision, so a clip requested at the exact segment start must still be accepted.
-    covering = next((s for s in segs if s["_start"] - timedelta(seconds=1) <= start < s["_start"] + timedelta(seconds=s["_dur"])), None)
+    # A clip requested at a segment's rendered (millisecond) start is clamped to the exact recorded start; the
+    # playback URL rounds it up to the millisecond so MediaMTX never sees a start inside the preceding gap.
+    covering, start = covering_segment(segs, start)
     if covering is None:
         raise conflict("No recording covers the requested start time")
-    if start < covering["_start"]:
-        start = covering["_start"]  # requested at the (rounded) segment boundary: clamp to what is recorded
 
     # download the range through the playback server (no ffmpeg dependency on the API path)
     chunks: list[bytes] = []

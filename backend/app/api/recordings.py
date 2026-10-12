@@ -19,6 +19,23 @@ from app.services.scope import scoped_camera
 router = APIRouter(tags=["recordings"], dependencies=[Depends(require_permission("cameras.read"))])
 
 RETENTION_H = 12
+# A start this far before a recorded timespan still counts as that timespan (CONTRACT Amendments 2026-09-05):
+# MediaMTX lists starts with microseconds, the API renders (and clients echo) milliseconds.
+BOUNDARY_TOLERANCE = timedelta(seconds=1)
+
+
+def covering_segment(segs: list[dict[str, Any]], start: datetime) -> tuple[dict[str, Any] | None, datetime]:
+    """`(timespan covering start, start to request)` over `_segments` rows (sorted by start). Pure.
+
+    A start inside a timespan is returned unchanged; one up to `BOUNDARY_TOLERANCE` before a timespan (e.g. its
+    millisecond rendering `.355` echoed back for a recorded `.355768`) is clamped to the exact recorded start.
+    `(None, start)` when nothing covers it. The playback URL then rounds the start up to the millisecond
+    (`mediamtx_client._rfc3339`), so the request never precedes the timespan (MediaMTX answers 404 if it does)."""
+    for seg in segs:
+        seg_start = seg["_start"]
+        if seg_start - BOUNDARY_TOLERANCE <= start < seg_start + timedelta(seconds=seg["_dur"]):
+            return seg, max(start, seg_start)
+    return None, start
 
 
 def _segments(raw: list[dict[str, Any]] | None, path: str) -> list[dict[str, Any]]:
@@ -65,10 +82,8 @@ async def resolve_play(cam: Camera, at: datetime, before_s: int, duration_s: int
     if not path or not cam.record_enabled:
         return {"url": None, "start": iso_z(start), "duration_s": duration_s, "available": False, "playback_path": path}
     segs = _segments(await playback_list(path, start - timedelta(minutes=5), start + timedelta(seconds=duration_s)), path)
-    covering = [s for s in segs if s["_start"] - timedelta(seconds=1) <= start < s["_start"] + timedelta(seconds=s["_dur"])]
-    if covering and start < covering[0]["_start"]:
-        start = covering[0]["_start"]  # boundary request: clamp to the recorded start
-    if not covering:
+    covering, start = covering_segment(segs, start)  # a boundary request is clamped to the recorded start
+    if covering is None:
         later = [s for s in segs if s["_start"] >= start and s["_start"] <= start + timedelta(seconds=duration_s)]
         if not later:
             return {"url": None, "start": iso_z(start), "duration_s": duration_s, "available": False, "playback_path": path}
