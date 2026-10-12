@@ -416,8 +416,14 @@ services:
       WORKER_ID: ${ANPR_LIVE_WORKER_ID:-live-gpu}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    # Own caps, not the CPU twin's: the CUDA runtime, cuDNN and the onnxruntime-gpu
+    # sessions add ~1-2 GiB of host RSS (measured 12-13 Oct with 8 cameras, 4 x
+    # 2560x1440 H.265 + 4 x 704x576 H.264: 3.5-4.2 GiB anon+shmem, 4.7-5.7 cores).
     deploy:
       resources:
+        limits:
+          cpus: "${ANPR_LIVE_GPU_CPUS:-6}"
+          memory: ${ANPR_LIVE_GPU_MEMORY:-6g}
         reservations:
           devices:
             - driver: nvidia
@@ -448,8 +454,13 @@ services:
       WORKER_ID: ${ANPR_PREINDEX_WORKER_ID:-preindex-gpu}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    # Own caps: the CPU twin's laptop value (ANPR_PREINDEX_MEMORY=1536m) would OOM
+    # this worker, measured at ~2.5 GiB on 12 Oct (same 8-camera set).
     deploy:
       resources:
+        limits:
+          cpus: "${ANPR_PREINDEX_GPU_CPUS:-3}"
+          memory: ${ANPR_PREINDEX_GPU_MEMORY:-3g}
         reservations:
           devices:
             - driver: nvidia
