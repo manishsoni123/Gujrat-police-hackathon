@@ -394,7 +394,7 @@ async function phaseB() {
   // The event arrives within seconds; the `decoder_restarts` counter travels with the next heartbeat (HEARTBEAT_S,
   // 15 s), so poll the health summary for it instead of reading it once.
   const restartedPoll = await pollUntil('decoder_restarts >= 1 in the next heartbeat', async () => {
-    const hb = (await req('GET', '/api/health/summary', { token: A })).data?.anpr_workers?.find((x) => x.mode === 'live');
+    const hb = (await req('GET', '/api/health/summary', { token: A })).data?.anpr_workers?.find((x) => x.mode === 'live' && !x.stale);
     const cs = (hb?.camera_states ?? []).find((c) => c.id === idOf(3));
     return (cs?.decoder_restarts ?? 0) >= 1 ? cs : null;
   }, { every: 5000, timeout: 45000 });
@@ -447,7 +447,7 @@ async function phaseB() {
   check('dashboard charts IST labels', ch.status === 200 && ch.data.vehicles_per_hour.length > 0 && ch.data.top_plates.length > 0 && /\d{2} \w{3} \d{2}:\d{2}/.test(ch.data.vehicles_per_hour[0].label_ist), `top=${ch.data?.top_plates?.slice(0, 3).map((p) => p.plate_display).join('|')} label=${ch.data?.vehicles_per_hour?.[0]?.label_ist}`);
   const oc = await req('GET', '/api/object-counts', { token: A });
   const hs = await req('GET', '/api/health/summary', { token: A });
-  const wk = hs.data?.anpr_workers?.find((x) => x.mode === 'live');
+  const wk = hs.data?.anpr_workers?.find((x) => x.mode === 'live' && !x.stale);
   // Object detection is off in the laptop demo profile (OBJECT_DETECT=0): the worker item then reports no object
   // weights (`extra.object_weights == null`) and the synthetic drawings hold no COCO objects anyway (CONTRACT §1.3 amendment).
   const objOff = wk?.object_detect === false || (wk?.extra != null && wk.extra.object_weights == null);
