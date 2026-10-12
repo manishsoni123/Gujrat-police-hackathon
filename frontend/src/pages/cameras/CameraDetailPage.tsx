@@ -122,6 +122,17 @@ function ObjectsTab({ cameraId, live }: { cameraId: number; live: Record<string,
   );
 }
 
+const DETECTIONS_PREF_KEY = 'sg.camera.detections';
+
+/** Detection-box overlay on by default; the viewer's last choice wins (per browser). */
+function readDetectionsPref(): boolean {
+  try {
+    return localStorage.getItem(DETECTIONS_PREF_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
 export function CameraDetailPage() {
   const { id } = useParams();
   const cameraId = Number(id);
@@ -137,6 +148,15 @@ export function CameraDetailPage() {
   const [eventOpen, setEventOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [tab, setTab] = useState('reads');
+  const [detections, setDetections] = useState(readDetectionsPref);
+  const toggleDetections = (on: boolean) => {
+    setDetections(on);
+    try {
+      localStorage.setItem(DETECTIONS_PREF_KEY, on ? '1' : '0');
+    } catch {
+      /* storage blocked: the toggle still works for this visit */
+    }
+  };
 
   useHealthSocket({ onHealth: (h) => h.camera_id === cameraId && setOffline(h.status === 'offline') });
   useEffect(() => {
@@ -201,7 +221,15 @@ export function CameraDetailPage() {
       />
       <div className="sg-grid sg-camera-layout">
         <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
-          <StreamPlayer cameraId={c.id} title={c.name} offline={offline} snapshotUrl={ws.snapshot?.url ?? null} onModeChange={setMode} />
+          <StreamPlayer
+            cameraId={c.id}
+            title={c.name}
+            offline={offline}
+            snapshotUrl={ws.snapshot?.url ?? null}
+            onModeChange={setMode}
+            detections={c.anpr_enabled && detections}
+            onDetectionsChange={c.anpr_enabled ? toggleDetections : undefined}
+          />
           <Card size="small" title="Camera metadata" extra={<span style={{ fontSize: 12, color: '#6B7280' }}>{mode ? `playing via ${mode === 'whep' ? 'WebRTC' : mode === 'hls' ? 'HLS' : 'snapshots'}` : 'connecting…'}</span>}>
             <Descriptions size="small" column={2} bordered>
               <Descriptions.Item label="Relay path">

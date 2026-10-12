@@ -89,6 +89,7 @@ class Settings:
     track_stall: int = 3                    # ANPR_TRACK_STALL: frames without growth after which a track counts as settled (OCR now)
     evidence_dir: str = ""                  # ANPR_EVIDENCE_DIR: write one crop + JSON line per detected vehicle here (empty = off)
     evidence_per_hour: int = 200            # ANPR_EVIDENCE_PER_HOUR: cap on evidence files per camera per hour
+    overlay: bool = True                    # ANPR_OVERLAY: live box overlay for watched cameras (POST /internal/overlay, live mode only)
     # Test / tooling knobs (not in the contract table; documented in anpr/README.md)
     api_dry_run: bool = False               # API_DRY_RUN=1 prints payloads instead of POSTing
     sources: dict[int, str] = field(default_factory=dict)  # static sources: "1=/media/synthetic/cam_1.mp4"
@@ -195,6 +196,7 @@ ENV_MAP: dict[str, str] = {
     "ANPR_TRACK_STALL": "track_stall",
     "ANPR_EVIDENCE_DIR": "evidence_dir",
     "ANPR_EVIDENCE_PER_HOUR": "evidence_per_hour",
+    "ANPR_OVERLAY": "overlay",
     "API_DRY_RUN": "api_dry_run",
     "ANPR_SOURCES": "sources",
     "ANPR_FILE_RE": "file_realtime",

@@ -1197,3 +1197,25 @@ export interface WsSnapshot {
   url: string;
   updated_at: string;
 }
+
+/** One box of a live overlay frame: `[x, y, w, h]` as fractions (0..1) of the decoded frame. */
+export interface WsOverlayBox {
+  box: [number, number, number, number];
+  conf: number;
+  /** Plate: the track's best valid read (null until OCR produced one). */
+  label?: string | null;
+  track?: number | null;
+  /** Object: person | bicycle | car | motorcycle | bus | truck. */
+  cls?: string | null;
+}
+
+/** `/ws/reads/{camera_id}` `overlay` message: the newest processed frame's boxes (never stored). */
+export interface WsOverlay {
+  camera_id: number;
+  captured_at: string;
+  frame_w: number;
+  frame_h: number;
+  plates: WsOverlayBox[];
+  objects: WsOverlayBox[];
+  objects_at: string | null;
+}

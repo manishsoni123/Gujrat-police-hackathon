@@ -1,7 +1,8 @@
-/** /ws/reads/{camera_id} subscription for the camera page (live reads, sightings, counts, snapshots, events). */
+/** /ws/reads/{camera_id} subscription for the camera page (live reads, sightings, counts, snapshots, events, overlay boxes). */
 import { useCallback, useState } from 'react';
-import type { Detection, EventItem, Sighting, WsEnvelope, WsObjectCounts, WsSnapshot } from '@/api/types';
+import type { Detection, EventItem, Sighting, WsEnvelope, WsObjectCounts, WsOverlay, WsSnapshot } from '@/api/types';
 import { useAuthStore } from '@/store/auth';
+import { publishOverlay } from './overlayBus';
 import { useSocket } from './useSocket';
 
 export interface ReadsSocketState {
@@ -44,6 +45,9 @@ export function useReadsSocket(cameraId: number | null, enabled = true): ReadsSo
         break;
       case 'event':
         setState((s) => ({ ...s, events: [env.data as EventItem, ...s.events].slice(0, 20) }));
+        break;
+      case 'overlay':
+        publishOverlay(env.data as WsOverlay); // straight to the canvas, no re-render
         break;
       default:
         break;

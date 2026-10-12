@@ -129,6 +129,10 @@ class ApiClient:
     def post_object_counts(self, camera_id: int, counts: list[dict[str, Any]]) -> dict[str, Any]:
         return self._request("POST", "/internal/object-counts", json_body={"camera_id": camera_id, "object_counts": counts})
 
+    def post_overlay(self, frames: list[dict[str, Any]]) -> dict[str, Any]:
+        """Live overlay frames (newest per watched camera); the answer lists the watched camera ids."""
+        return self._request("POST", "/internal/overlay", json_body={"frames": frames})
+
     def post_heartbeat(self, body: dict[str, Any]) -> None:
         self._request("POST", "/internal/heartbeat", json_body=body)
 
@@ -145,7 +149,7 @@ class ApiClient:
 # ---------------------------------------------------------------------------
 @dataclass
 class Job:
-    kind: str                       # detections | events | object_counts | snapshot | heartbeat
+    kind: str                       # detections | events | object_counts | snapshot | heartbeat | overlay
     camera_id: int | None
     call: Callable[[], Any]
     attempts: int = 0
@@ -231,7 +235,7 @@ class Sender(threading.Thread):
                 log.warning("dropped %s for camera %s: %s", job.kind, job.camera_id, exc)
                 return
             except RetryableError as exc:
-                if job.kind in ("snapshot", "heartbeat") or job.attempts >= self.max_attempts:
+                if job.kind in ("snapshot", "heartbeat", "overlay") or job.attempts >= self.max_attempts:
                     self.stats["failed"] += 1
                     log.warning("giving up on %s for camera %s after %d attempt(s): %s",
                                 job.kind, job.camera_id, job.attempts, exc)

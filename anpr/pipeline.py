@@ -41,13 +41,14 @@ from typing import Any
 import numpy as np
 
 from anpr import __version__
-from anpr.client import ApiClient, ApiError, FatalAuthError, Job, Sender, iso_utc
+from anpr.client import ApiClient, ApiError, DroppedError, FatalAuthError, Job, Sender, iso_utc
 from anpr.config import Settings, load_settings, redacted
 from anpr.decode import Decoder, DialGate, Frame, encode_jpeg, jpeg_under, resize_width
 from anpr.detector import Box, OsdMask, StaticBoxFilter, build_detector, detector_status
 from anpr.evidence import EvidenceStore
 from anpr.normalise import normalise
 from anpr.objects import ObjectCounter, YoloxDetector
+from anpr.overlay import OverlayFeed, overlay_frame
 from anpr.sightings import Sighting, SightingTracker
 from anpr.tracks import PlateTracker, Track, crop_with_context, track_kind
 from anpr.voting import Candidate, VotedRead, Voter
@@ -63,6 +64,7 @@ SNAPSHOT_MAX_BYTES = 150_000
 MIN_OCR_CHARS = 6
 EDGE_MARGIN_PX = 2
 LIVE_COUNTS_EVERY_S = 5.0
+OVERLAY_OBJECTS_MAX_AGE_S = 3.0  # object boxes older than this are not drawn (YOLOX runs every OBJECT_EVERY_N frames)
 STATS_LOG_EVERY_S = 30.0
 
 
@@ -146,6 +148,9 @@ class CameraWorker:
         self.last_snapshot_mono = 0.0
         self.last_flush_mono = time.monotonic()
         self.last_live_counts_mono = 0.0
+        self.last_objects: list[Any] = []          # newest YOLOX detections (live overlay)
+        self.last_objects_at: str | None = None
+        self.last_objects_mono = 0.0
         self.static_boxes = StaticBoxFilter(window=settings.static_box_window, min_hits=settings.static_box_hits)
         self.osd = OsdMask(band=settings.osd_band, warmup_s=settings.osd_warmup_s)
         self.tracker = PlateTracker(cfg.id, gap_s=settings.track_gap_s, keep=settings.track_keep, stall_updates=settings.track_stall)
@@ -280,6 +285,7 @@ class Pipeline:
                 self.objects = YoloxDetector(settings.object_model, conf=settings.object_conf, cpu=settings.cpu, threads=settings.ocr_threads)
             except Exception as exc:  # noqa: BLE001 - counting is optional
                 log.warning("object counting disabled: %s", exc)
+        self.overlay = OverlayFeed(enabled=settings.overlay and settings.mode == "live")
         self.voter = Voter(window_s=settings.vote_window_s)
         self.sightings = SightingTracker(close_after_s=settings.sighting_close_s)
         self.cameras: dict[int, CameraWorker] = {}
@@ -378,6 +384,7 @@ class Pipeline:
                 except ApiError as exc:
                     log.warning("config reload failed: %s", exc)
                 next_config = now + self.settings.config_reload_s
+            self._maybe_send_overlay()   # subscriber poll even when no frame is processed
             self.stop_event.wait(0.5)
 
     def heartbeat_body(self) -> dict[str, Any]:
@@ -401,6 +408,7 @@ class Pipeline:
                         "best_shot": bool(self.settings.best_shot), "detect_width": self.settings.detect_width},
                 "vehicles": {str(cid): cam.vehicle_stats() for cid, cam in self.cameras.items()},
                 "evidence": self.evidence.stats(),
+                "overlay": {"enabled": self.overlay.enabled, "sent_frames": self.overlay.sent_frames},
             },
         }
 
@@ -575,6 +583,7 @@ class Pipeline:
                 finished, events = cam.counter.update(dets, frame.captured_at, frame.image.shape[:2])
                 self.timing["objects_ms"] += (time.perf_counter() - t3) * 1000
                 self.timing["object_calls"] += 1
+                cam.last_objects, cam.last_objects_at, cam.last_objects_mono = dets, iso_utc(frame.captured_at), time.monotonic()
                 cam.pending.object_counts.extend(finished)
                 for ev in events:
                     cam.pending.events.append((ev, jpeg_under(frame.image, FRAME_MAX_BYTES, quality=80)))
@@ -585,8 +594,43 @@ class Pipeline:
             if now - cam.last_snapshot_mono >= self.settings.snapshot_interval_s:
                 cam.last_snapshot_mono = now
                 self._snapshot(cam, frame)
+            if self.overlay.watched(cam.cfg.id):
+                self._offer_overlay(cam, frame, boxes, now)
         cam.frames_processed += 1
         self.timing["frames"] += 1
+        self._maybe_send_overlay()
+
+    # ---- live overlay ----------------------------------------------------------
+    def _offer_overlay(self, cam: CameraWorker, frame: Frame, boxes: list[Box], now: float) -> None:
+        if self.settings.best_shot:
+            tracks: list[Any] = [t for t in cam.tracker.tracks if not t.ended and t.last_seen == frame.captured_at]
+        else:  # per-frame OCR mode has no tracks: unlabelled boxes
+            tracks = [Track(0, cam.cfg.id, b, frame.captured_at, frame.captured_at, frame.stream_pts) for b in boxes]
+        fresh = now - cam.last_objects_mono <= OVERLAY_OBJECTS_MAX_AGE_S
+        self.overlay.offer(overlay_frame(cam.cfg.id, iso_utc(frame.captured_at), frame.image.shape, tracks,
+                                         cam.last_objects if fresh else (), cam.last_objects_at if fresh else None))
+
+    def _maybe_send_overlay(self) -> None:
+        if self.overlay.due():
+            self.sender.submit_latest("overlay", Job("overlay", None, self._post_overlay))
+
+    def _post_overlay(self) -> None:
+        """Sender-thread job: post the newest frame of every watched camera, learn the watched set."""
+        frames = self.overlay.take()
+        watched = None
+        try:
+            resp = self.client.post_overlay(frames)
+            watched = resp.get("watched", []) if isinstance(resp, dict) else []
+            self.overlay.sent_frames += len(frames)
+        except DroppedError as exc:
+            if ": 404 " in str(exc):  # API without the endpoint: stop polling instead of logging every 2 s
+                log.warning("API has no /internal/overlay - live overlay disabled")
+                self.overlay.disable()
+                return
+            raise
+        finally:
+            if self.overlay.enabled:
+                self.overlay.done(watched)
 
     def _snapshot(self, cam: CameraWorker, frame: Frame) -> None:
         jpeg = jpeg_under(resize_width(frame.image, self.settings.snapshot_width), SNAPSHOT_MAX_BYTES, quality=70)

@@ -107,7 +107,7 @@ on 5 Sept 2026 (CONTRACT Amendments): `ANPR_OSD_BAND` (0.08), `ANPR_OSD_WARMUP_S
 `ANPR_OCR` (paddle | fast_plate | ensemble), `ANPR_OCR_FAST_MODEL` (global_mobile_vit_v2_ocr), `ANPR_OCR_PADDLE_MODE`
 (det | auto | rec), `ANPR_OCR_ENSEMBLE_MIN_CONF` (0.45), `ANPR_OCR_MIN_W` (60 px), `ANPR_DETECT_WIDTH` (0 = decoded
 width), `ANPR_BEST_SHOT` (1), `ANPR_TRACK_GAP_S` (2), `ANPR_TRACK_KEEP` (3), `ANPR_TRACK_STALL` (3),
-`ANPR_EVIDENCE_DIR` (empty), `ANPR_EVIDENCE_PER_HOUR` (200), `ANPR_STATIC_BOX_HITS` (0.8; 0.5 on the organiser
+`ANPR_EVIDENCE_DIR` (empty), `ANPR_EVIDENCE_PER_HOUR` (200), `ANPR_OVERLAY` (1: live box overlay for watched cameras), `ANPR_STATIC_BOX_HITS` (0.8; 0.5 on the organiser
 feeds, whose captions are boxed intermittently); `FRAME_WIDTH=0` decodes at the source resolution. An OCR string
 without a digit (signboard, burnt-in caption) is never voted (`extra.suppression.no_digit`).
 `config.yml` uses the same names in lowercase. Values pinned by env or CLI are never overridden by the server's `settings`

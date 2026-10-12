@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.core.errors import ApiError, bad_request, validation_error
 from app.core.tz import iso_z, parse_iso, utcnow
 from app.db.models import AnprWorker, Camera, Zone
-from app.schemas.internal import DetectionBatch, EventsBatch, Heartbeat, ObjectCountsBody
+from app.schemas.internal import DetectionBatch, EventsBatch, Heartbeat, ObjectCountsBody, OverlayBatch
 from app.services import serializers
 from app.services.health_poller import worker_item
 from app.services.mediamtx_client import relay_path, relay_rtsp_url
@@ -141,6 +141,24 @@ async def object_counts(body: ObjectCountsBody, db: DbDep):
     n = await upsert_object_counts(db, cam.id, body.object_counts, rejected)
     await db.commit()
     return {"object_counts_upserted": n, "rejected": rejected}
+
+
+@router.post("/internal/overlay")
+async def overlay(body: OverlayBatch, db: DbDep):
+    """Live detection boxes: relayed as `overlay` on `/ws/reads/{camera_id}` (scoped like reads), never stored.
+
+    The answer tells the worker which cameras currently have a viewer, so it only builds frames for those.
+    """
+    watched = manager.watched_cameras()
+    frames = [f for f in body.frames if f.camera_id in watched]
+    if frames:
+        ids = sorted({f.camera_id for f in frames})
+        rows = (await db.execute(select(Camera.id, Camera.department_id, Camera.district).where(Camera.id.in_(ids)))).all()
+        scope_by_id = {int(r[0]): (r[1], r[2]) for r in rows}
+        for f in frames:
+            if f.camera_id in scope_by_id:
+                manager.broadcast(f"reads:{f.camera_id}", "overlay", f.model_dump(), *scope_by_id[f.camera_id])
+    return {"watched": watched}
 
 
 MAX_EXTRA_BYTES = 16 * 1024

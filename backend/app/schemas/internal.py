@@ -113,6 +113,46 @@ class ObjectCountsBody(ApiModel):
     object_counts: list[ObjectCountIn] = Field(default_factory=list)
 
 
+class OverlayBox(ApiModel):
+    """One box of a live overlay frame: ``[x, y, w, h]`` as fractions (0..1) of the decoded frame."""
+
+    box: list[float]
+    conf: float = Field(ge=0.0, le=1.0)
+    label: str | None = Field(None, max_length=16)   # plate: the track's best valid read
+    track: int | None = None                         # plate: worker track id
+    cls: str | None = None                           # object: OBJECT_CLASSES
+
+    @field_validator("box")
+    @classmethod
+    def _box(cls, v: list[float]) -> list[float]:
+        if len(v) != 4 or any(not 0.0 <= float(x) <= 1.0 for x in v):
+            raise ValueError("box must be [x, y, w, h] with every value in 0..1")
+        return [float(x) for x in v]
+
+    @field_validator("cls")
+    @classmethod
+    def _cls(cls, v: str | None) -> str | None:
+        if v is not None and v not in OBJECT_CLASSES:
+            raise ValueError(f"must be one of {', '.join(OBJECT_CLASSES)}")
+        return v
+
+
+class OverlayFrame(ApiModel):
+    camera_id: int
+    captured_at: str
+    frame_w: int = Field(ge=1, le=16384)
+    frame_h: int = Field(ge=1, le=16384)
+    plates: list[OverlayBox] = Field(default_factory=list, max_length=16)
+    objects: list[OverlayBox] = Field(default_factory=list, max_length=64)
+    objects_at: str | None = None
+
+
+class OverlayBatch(ApiModel):
+    """POST /internal/overlay: the newest frame per watched camera (never stored, relayed on /ws/reads/{id})."""
+
+    frames: list[OverlayFrame] = Field(default_factory=list, max_length=64)
+
+
 class HeartbeatCamera(ApiModel):
     id: int
     state: str = "running"

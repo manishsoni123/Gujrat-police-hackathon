@@ -9,12 +9,13 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, Spin, Tooltip } from 'antd';
-import { ExpandOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
+import { ExpandOutlined, ReloadOutlined, ScanOutlined, SettingOutlined } from '@ant-design/icons';
 import Hls from 'hls.js';
 import { streamsApi } from '@/api';
 import { authHeaders } from '@/api/client';
 import type { StreamInfo } from '@/api/types';
 import { withCacheBuster } from '@/utils/format';
+import { DetectionOverlay } from './DetectionOverlay';
 
 export type PlayerMode = 'auto' | 'whep' | 'hls' | 'snapshot';
 export type ActiveMode = 'whep' | 'hls' | 'snapshot';
@@ -37,6 +38,10 @@ export interface StreamPlayerProps {
   snapshotUrl?: string | null;
   compact?: boolean;
   onInfo?: (info: StreamInfo) => void;
+  /** Draw live detection boxes (`/ws/reads` `overlay` frames) over the video. */
+  detections?: boolean;
+  /** When set, the control bar gets a detections toggle. */
+  onDetectionsChange?: (on: boolean) => void;
 }
 
 const ICE_TIMEOUT_MS = 5000;
@@ -443,6 +448,7 @@ export function StreamPlayer(props: StreamPlayerProps) {
   return (
     <div className="sg-player" ref={containerRef} tabIndex={0} aria-label={`Live stream ${title ?? info?.name ?? cameraId}`}>
       <video ref={videoRef} muted={muted} playsInline autoPlay controls={false} style={{ display: showVideo ? undefined : 'none' }} />
+      {props.detections && showVideo ? <DetectionOverlay cameraId={cameraId} videoRef={videoRef} /> : null}
       {!showVideo ? (
         snapshotSrc ? (
           <img src={snapshotSrc} alt={`Latest snapshot of ${title ?? info?.name ?? `camera ${cameraId}`}`} />
@@ -481,6 +487,18 @@ export function StreamPlayer(props: StreamPlayerProps) {
         <div className="sg-player-title">{title ?? info?.name ?? `Camera ${cameraId}`}</div>
         {!snapshotOnly ? (
           <div className="sg-player-controls sg-no-print">
+            {props.onDetectionsChange ? (
+              <Tooltip title={props.detections ? 'Hide detection boxes' : 'Show detection boxes'}>
+                <Button
+                  size="small"
+                  type={props.detections ? 'primary' : 'default'}
+                  icon={<ScanOutlined />}
+                  onClick={() => props.onDetectionsChange?.(!props.detections)}
+                  aria-pressed={Boolean(props.detections)}
+                  aria-label="Detection boxes"
+                />
+              </Tooltip>
+            ) : null}
             <Dropdown menu={modeMenu} trigger={['click']}>
               <Tooltip title="Playback mode">
                 <Button size="small" icon={<SettingOutlined />} aria-label="Playback mode" />

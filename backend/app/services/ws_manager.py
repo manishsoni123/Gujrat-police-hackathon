@@ -104,5 +104,9 @@ class WsManager:
     def connections(self, channel: str | None = None) -> list[Connection]:
         return [c for c in self._conns if channel is None or c.channel == channel]
 
+    def watched_cameras(self) -> list[int]:
+        """Camera ids with at least one `/ws/reads/{id}` subscriber (the live overlay feed is sent only for these)."""
+        return sorted({c.camera_id for c in self._conns if c.camera_id is not None and c.channel == f"reads:{c.camera_id}"})
+
 
 manager = WsManager()
