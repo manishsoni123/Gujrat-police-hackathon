@@ -304,3 +304,38 @@ while true; do echo "== $(date -u +%H:%M:%S)"; docker stats --no-stream --format
 node scripts/measure_live_anpr.mjs 2026-09-05T16:20:00Z 2026-09-05T16:40:00Z media/anpr_measure/w3 20 \
   --footage "14-06-2026 02:06-02:26 (cam01 clock)" --stats stats.txt
 ```
+
+## 8. 12 Oct 2026 follow-ups: state codes (adopted) and plate straightening (rejected)
+
+Own test camera 81 (`Dynatech Test 1`, ceiling fisheye, H.265 2560x1440) sees a parked Tata with
+HSRP plate `GJ01WC0824`: the plate is ~68x19 px, characters ~5x10 px, tilted 15-20°. OCR read it
+as `8G3O1NCO824`, `FSJO1NCO824`, `RGJO1VCOAZA` - never correctly.
+
+* **Dropping a leading HSRP glyph** (the blue `IND` strip read as `8`/`F`/`R`): rejected. Replayed
+  over the 6,263 invalid reads in the DB it validated 5, four of them into non-existent state
+  codes (`SJ…`, `JQ…`, `JO…`).
+* **State-code rule** (CONTRACT §3.4 step 5a, amendment 2026-10-12): adopted. Replayed over all
+  21,418 stored reads: 57 corrected (`GI27XY3456→GJ27XY3456` ×51 on cam 3; `GU03KH0407`,
+  `GL08A5388`, `GI18ZU3599` → GJ), 7 garbage strings no longer valid (`SI1A5599`, `JI50B2934`,
+  `BJ25I7596`, …), none newly valid.
+* **Plate straightening** (Otsu plate region → minAreaRect → level or tight perspective crop):
+  rejected. 443 evidence crops, production ensemble decision rule, new normaliser:
+
+| Crops | Design | Correct | Valid | Wrong but valid |
+|---|---|---|---|---|
+| synthetic cams 1-8 (320, truth = `plates.json` plates of that camera) | today: paddle(raw) + cct_xs(raw) | 172 | 177 | 5 |
+| | paddle(raw) + cct_xs(tight) | 174 | 181 | 7 |
+| | both tight | 174 | 181 | 7 |
+| | both levelled | 172 | 177 | 5 |
+| cam 81 (71, truth `GJ01WC0824`) | today | 0 | 1 | 1 |
+| | paddle(raw) + cct_xs(tight) | 0 | 4 | 4 |
+| organiser cams 51/52/54/55 (52, no truth) | every design | - | 0 | - |
+
+  A tight crop buys +2 correct synthetic reads for +2 wrong-valid ones and quadruples wrong-valid
+  reads on cam 81; levelling alone changes nothing. Isolated, PaddleOCR got worse on tight crops
+  (mean edit distance to the truth on cam 81: 6.9 raw → 7.4 tight) while cct_xs improved
+  (9.6 → 5.1, first `W` seen) - still 0 exact reads. At ~5 px per character the remedy is more
+  pixels on the plate (camera placement / zoom), not preprocessing.
+* Noted, not changed: §3.4 step 5 accepts a k=2 candidate whose second "district digit" is a
+  letter when the regex can re-parse it as one digit + series (`GLOAE L2866` → `GJ0AEL2866`,
+  district 0).

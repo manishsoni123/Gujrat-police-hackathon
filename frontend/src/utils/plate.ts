@@ -16,8 +16,34 @@ const TO_DIGIT: Record<string, string> = { O: '0', I: '1', S: '5', B: '8', Z: '2
 const STANDARD = /^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$/;
 const BH = /^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$/;
 
+// Registration state / UT codes (MoRTH). 28 states + 8 UTs, plus legacy codes still on the road:
+// TS (Telangana until 2024, now TG), OR (Odisha until 2012, now OD), UA (Uttarakhand until 2007,
+// now UK), DN (Dadra & Nagar Haveli until the 2020 merger into DD).
+const STATE_CODES = new Set([
+  'AP', 'AR', 'AS', 'BR', 'CG', 'GA', 'GJ', 'HR', 'HP', 'JH', 'KA', 'KL', 'MP', 'MH',
+  'MN', 'ML', 'MZ', 'NL', 'OD', 'PB', 'RJ', 'SK', 'TN', 'TG', 'TR', 'UP', 'UK', 'WB',
+  'AN', 'CH', 'DD', 'DL', 'JK', 'LA', 'LD', 'PY',
+  'TS', 'OR', 'UA', 'DN',
+]);
+// State-slot misreads (applied after fixLetter): a J that lost its hook, a G that lost its bar,
+// a D or G read as O.
+const STATE_FIX: Record<string, string> = { I: 'J', L: 'J', U: 'J', C: 'G', O: 'DG' };
+
 const fixLetter = (c: string): string => TO_LETTER[c] ?? c;
 const fixDigit = (c: string): string => TO_DIGIT[c] ?? c;
+
+/** Known state code → unchanged; else the unique one-glyph STATE_FIX that yields one; else null. */
+function fixState(cand: string): string | null {
+  if (STATE_CODES.has(cand.slice(0, 2))) return cand;
+  const fixes = new Set<string>();
+  for (const i of [0, 1]) {
+    for (const alt of STATE_FIX[cand[i]] ?? '') {
+      const fixed = cand.slice(0, i) + alt + cand.slice(i + 1);
+      if (STATE_CODES.has(fixed.slice(0, 2))) fixes.add(fixed);
+    }
+  }
+  return fixes.size === 1 ? [...fixes][0] : null;
+}
 
 function countSubs(a: string, b: string): number {
   let n = 0;
@@ -38,14 +64,16 @@ export function normalisePlate(raw: string): NormResult {
     const series = mid.slice(k);
     if (digits.length < k) continue;
     if (series.length < 1 || series.length > 3) continue;
-    const cand =
+    const built =
       fixLetter(s[0]) +
       fixLetter(s[1]) +
       digits.split('').map(fixDigit).join('') +
       series.split('').map(fixLetter).join('') +
       s.slice(-4).split('').map(fixDigit).join('');
-    if (!STANDARD.test(cand)) continue;
-    if (k === 1 && cand[2] === '0') continue;
+    if (!STANDARD.test(built)) continue;
+    if (k === 1 && built[2] === '0') continue;
+    const cand = fixState(built);
+    if (cand === null) continue;
     const subs = countSubs(cand, s);
     if (!standard || subs < standard.subs) standard = { cand, subs };
   }

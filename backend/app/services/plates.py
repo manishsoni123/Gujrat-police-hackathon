@@ -14,6 +14,19 @@ _NON_ALNUM = re.compile(r"[^A-Z0-9]")
 
 MAX_SUBS = 2
 
+# Registration state / UT codes (MoRTH). 28 states + 8 UTs, plus legacy codes still on the road:
+# TS (Telangana until 2024, now TG), OR (Odisha until 2012, now OD), UA (Uttarakhand until 2007,
+# now UK), DN (Dadra & Nagar Haveli until the 2020 merger into DD).
+STATE_CODES = frozenset({
+    "AP", "AR", "AS", "BR", "CG", "GA", "GJ", "HR", "HP", "JH", "KA", "KL", "MP", "MH",
+    "MN", "ML", "MZ", "NL", "OD", "PB", "RJ", "SK", "TN", "TG", "TR", "UP", "UK", "WB",
+    "AN", "CH", "DD", "DL", "JK", "LA", "LD", "PY",
+    "TS", "OR", "UA", "DN",
+})
+# State-slot misreads (applied after fix_letter): a J that lost its hook, a G that lost its bar,
+# a D or G read as O.
+STATE_FIX = {"I": "J", "L": "J", "U": "J", "C": "G", "O": "DG"}
+
 
 @dataclass(frozen=True)
 class NormResult:
@@ -35,8 +48,21 @@ def _count_subs(a: str, b: str) -> int:
     return sum(1 for x, y in zip(a, b) if x != y)
 
 
+def fix_state(cand: str) -> str | None:
+    """Known state code → unchanged; else the unique one-glyph STATE_FIX that yields one, else None."""
+    if cand[:2] in STATE_CODES:
+        return cand
+    fixes = {
+        cand[:i] + alt + cand[i + 1:]
+        for i in (0, 1)
+        for alt in STATE_FIX.get(cand[i], "")
+        if (cand[:i] + alt + cand[i + 1:2]) in STATE_CODES
+    }
+    return fixes.pop() if len(fixes) == 1 else None
+
+
 def _standard_candidate(s: str) -> tuple[str, int] | None:
-    """Best standard-format candidate (fewest substitutions, tie → k=2) or None."""
+    """Best standard-format candidate with a real state code (fewest substitutions, tie → k=2) or None."""
     if len(s) < 7:
         return None
     mid = s[2:-4]
@@ -59,6 +85,10 @@ def _standard_candidate(s: str) -> tuple[str, int] | None:
             continue
         if k == 1 and cand[2] == "0":
             continue  # district 0 does not exist
+        fixed = fix_state(cand)
+        if fixed is None:
+            continue  # no real state code within one glyph
+        cand = fixed
         subs = _count_subs(cand, s)
         if best is None or subs < best[1]:
             best = (cand, subs)

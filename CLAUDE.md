@@ -103,7 +103,7 @@ One process = N ffmpeg decoder threads (`decode.py`: `-rtsp_transport tcp`, no f
 
 Config precedence (`config.py`): CLI > env > server `/internal/anpr-config` settings > `config.yml` > defaults; a value pinned by env or CLI is never overridden by the server. A new tunable needs an entry in `ENV_MAP`, the compose `x-anpr-env` block and `deploy/.env.example`. Model weights are SHA-256 verified at build (`weights/HASHES.txt`, `weights/download.py`) and again at start; missing ONNX weights start the worker **degraded** (`contour-fallback` in the heartbeat) rather than crashing.
 
-`normalise.py` and `backend/app/services/plates.py` implement the same CONTRACT §3.4 algorithm and share 20 test vectors (`anpr/tests/test_normalise.py`, `backend/tests/test_normalise.py`); change both or neither.
+`normalise.py`, `backend/app/services/plates.py` and `frontend/src/utils/plate.ts` implement the same CONTRACT §3.4 algorithm (incl. the step 5a state-code rule); the Python pair shares 20 contract vectors + `STATE_VECTORS` (`anpr/tests/test_normalise.py`, `backend/tests/test_normalise.py`); change all three or none.
 
 ### Frontend (`frontend/src`)
 

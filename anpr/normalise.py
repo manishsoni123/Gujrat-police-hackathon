@@ -23,6 +23,19 @@ TO_DIGIT = {"O": "0", "I": "1", "S": "5", "B": "8", "Z": "2", "G": "6", "Q": "0"
 MAX_SUBSTITUTIONS = 2
 _NON_ALNUM = re.compile(r"[^A-Z0-9]")
 
+# Registration state / UT codes (MoRTH). 28 states + 8 UTs, plus legacy codes still on the road:
+# TS (Telangana until 2024, now TG), OR (Odisha until 2012, now OD), UA (Uttarakhand until 2007,
+# now UK), DN (Dadra & Nagar Haveli until the 2020 merger into DD).
+STATE_CODES = frozenset({
+    "AP", "AR", "AS", "BR", "CG", "GA", "GJ", "HR", "HP", "JH", "KA", "KL", "MP", "MH",
+    "MN", "ML", "MZ", "NL", "OD", "PB", "RJ", "SK", "TN", "TG", "TR", "UP", "UK", "WB",
+    "AN", "CH", "DD", "DL", "JK", "LA", "LD", "PY",
+    "TS", "OR", "UA", "DN",
+})
+# State-slot misreads (applied after fix_letter): a J that lost its hook, a G that lost its bar,
+# a D or G read as O.
+STATE_FIX = {"I": "J", "L": "J", "U": "J", "C": "G", "O": "DG"}
+
 
 @dataclass(frozen=True)
 class NormResult:
@@ -52,10 +65,24 @@ def _count_subs(cand: str, s: str) -> int:
     return sum(1 for a, b in zip(cand, s) if a != b)
 
 
+def fix_state(cand: str) -> str | None:
+    """Step 5a: a known state code is kept; else the unique one-glyph ``STATE_FIX`` that yields one."""
+    if cand[:2] in STATE_CODES:
+        return cand
+    fixes = {
+        cand[:i] + alt + cand[i + 1:]
+        for i in (0, 1)
+        for alt in STATE_FIX.get(cand[i], "")
+        if (cand[:i] + alt + cand[i + 1:2]) in STATE_CODES
+    }
+    return fixes.pop() if len(fixes) == 1 else None
+
+
 def _standard_candidates(s: str) -> list[tuple[int, str, int]]:
     """Step 5: position-aware candidates for k = 2 and k = 1 district digits.
 
-    Returns ``(subs, cand, k)`` for every k that yields a valid standard plate, k=2 first.
+    Returns ``(subs, cand, k)`` for every k that yields a valid standard plate with a real state
+    code (step 5a), k=2 first.
     """
     out: list[tuple[int, str, int]] = []
     mid = s[2:-4]
@@ -74,6 +101,9 @@ def _standard_candidates(s: str) -> list[tuple[int, str, int]]:
             continue
         if k == 1 and cand[2] == "0":
             continue  # there is no district 0
+        cand = fix_state(cand)
+        if cand is None:
+            continue  # no real state code within one glyph
         out.append((_count_subs(cand, s), cand, k))
     return out
 

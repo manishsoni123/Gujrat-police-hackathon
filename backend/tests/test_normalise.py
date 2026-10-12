@@ -11,7 +11,7 @@ VECTORS = [
     ("gj-01-ab-1234", "GJ01AB1234", True, "standard", 0),
     ("IND GJ05 RS 5678", "GJ05RS5678", True, "standard", 0),
     ("GJO1AB1234", "GJ01AB1234", True, "standard", 1),
-    ("G101AB1234", "GI01AB1234", True, "standard", 1),
+    ("G101AB1234", "GJ01AB1234", True, "standard", 1),
     ("GJ01A81234", "GJ01AB1234", True, "standard", 1),
     ("MH12DE14O3", "MH12DE1403", True, "standard", 1),
     ("GJ1AB1234", "GJ1AB1234", True, "standard", 0),
@@ -21,7 +21,7 @@ VECTORS = [
     ("Z2BH4321AA", "22BH4321AA", True, "bh", 1),
     ("GJ0IAB1234", "GJ01AB1234", True, "standard", 1),
     ("KA05MK 0101", "KA05MK0101", True, "standard", 0),
-    ("8H01AB1234", "BH01AB1234", True, "standard", 1),
+    ("8H01AB1234", "8H01AB1234", False, None, 0),
     ("GJ01AB12345", "GJ01AB12345", False, None, 0),
     ("GJ01ABCD1234", "GJ01ABCD1234", False, None, 0),
     ("ABC", "ABC", False, None, 0),
@@ -32,6 +32,32 @@ VECTORS = [
 
 @pytest.mark.parametrize("raw,expected,valid,pattern,subs", VECTORS)
 def test_contract_vectors(raw: str, expected: str, valid: bool, pattern: str | None, subs: int) -> None:
+    r = normalise(raw)
+    assert r.plate_norm == expected
+    assert r.is_valid_format is valid
+    assert r.pattern == pattern
+    assert r.substitutions == subs
+
+
+# Step 5a state-code vectors (CONTRACT amendment 2026-10-12), mirrored in anpr/tests.
+STATE_VECTORS = [
+    ("GI27XY3456", "GJ27XY3456", True, "standard", 1),
+    ("GU03KH0407", "GJ03KH0407", True, "standard", 1),
+    ("DO01AB1234", "DD01AB1234", True, "standard", 1),
+    ("C601AB1234", "CG01AB1234", True, "standard", 1),
+    ("G10IAB1234", "GJ01AB1234", True, "standard", 2),
+    ("G10IA81234", "G10IA81234", False, None, 0),
+    ("SI1A5599", "SI1A5599", False, None, 0),
+    ("BJ25I7596", "BJ25I7596", False, None, 0),
+    ("TG09AB1234", "TG09AB1234", True, "standard", 0),
+    ("OR02AB1234", "OR02AB1234", True, "standard", 0),
+    ("UA07C1234", "UA07C1234", True, "standard", 0),
+    ("LA01AB1234", "LA01AB1234", True, "standard", 0),
+]
+
+
+@pytest.mark.parametrize("raw,expected,valid,pattern,subs", STATE_VECTORS)
+def test_state_vectors(raw: str, expected: str, valid: bool, pattern: str | None, subs: int) -> None:
     r = normalise(raw)
     assert r.plate_norm == expected
     assert r.is_valid_format is valid
