@@ -6,12 +6,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Badge, Button, Card, Descriptions, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
-import { EditOutlined, TagOutlined, UnorderedListOutlined, WifiOutlined } from '@ant-design/icons';
+import { Alert, Badge, Button, Card, Descriptions, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
+import { EditOutlined, ReloadOutlined, TagOutlined, UnorderedListOutlined, WifiOutlined } from '@ant-design/icons';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader } from '@/components/PageHeader';
 import { StreamPlayer, type ActiveMode } from '@/components/StreamPlayer';
 import { camerasApi, detectionsApi, eventsApi, objectsApi } from '@/api';
+import { errorMessage } from '@/api/client';
 import type { Camera, Detection, EventItem } from '@/api/types';
 import { useReadsSocket } from '@/ws/useReadsSocket';
 import { useHealthSocket } from '@/ws/useHealthSocket';
@@ -185,9 +186,11 @@ export function CameraDetailPage() {
   }, [ws.events, events.data]);
 
   if (cam.isLoading) return <PageSkeleton cards={2} />;
-  if (cam.isError) return <ErrorState error={cam.error} onRetry={() => void cam.refetch()} />;
   const c = cam.data;
-  if (!c) return null;
+  // Full-page error only when nothing has loaded. A failed background re-read (30 s ANPR poll, health
+  // invalidation) keeps `data` but flips `isError`: replacing the page then would unmount the stream
+  // (WHEP re-dial) and an open edit modal (unsaved edits lost), so keep the last good camera on screen.
+  if (!c) return cam.isError ? <ErrorState error={cam.error} onRetry={() => void cam.refetch()} /> : null;
 
   return (
     <div>
@@ -236,6 +239,20 @@ export function CameraDetailPage() {
           </Space>
         }
       />
+      {cam.isRefetchError ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Could not refresh this camera; showing the last loaded details (status and ANPR state may be out of date)."
+          description={errorMessage(cam.error)}
+          action={
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => void cam.refetch()}>
+              Retry
+            </Button>
+          }
+        />
+      ) : null}
       <div className="sg-grid sg-camera-layout">
         <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
           <StreamPlayer

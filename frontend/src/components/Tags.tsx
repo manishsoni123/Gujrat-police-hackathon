@@ -90,12 +90,20 @@ const ANPR_STATUS: Record<Exclude<AnprStatus, 'off'>, { colour: string; label: s
 };
 
 /**
+ * `anpr_status: 'off'` while `anpr_enabled` is ticked: the camera is retired or has no source URL, so
+ * /internal/anpr-config never hands it to the live worker. Shown so the pill does not vanish while the
+ * edit form still shows ANPR ticked.
+ */
+const ANPR_IDLE = { colour: '#9CA3AF', label: 'ANPR idle', short: 'idle', hint: 'ANPR is ticked, but this camera is retired or has no source URL, so no live ANPR worker is given it.' };
+
+/**
  * ANPR pill driven by the camera's real processing state (`anpr_status`), not by `anpr_enabled` alone.
  * A server that does not send `anpr_status` falls back to a neutral "ANPR on" pill for an enabled camera.
- * `empty` is rendered instead when ANPR is off (e.g. a grey dash in a table cell).
+ * `empty` is rendered instead when ANPR is not enabled (e.g. a grey dash in a table cell).
  */
 export function AnprTag({ status, enabled, size, short, empty }: { status: AnprStatus | null | undefined; enabled: boolean; size?: 'small' | 'default'; short?: boolean; empty?: React.ReactNode }) {
-  if (status === 'off' || (!status && !enabled)) return empty ? <>{empty}</> : null;
+  if (!enabled && (!status || status === 'off')) return empty ? <>{empty}</> : null;
+  if (status === 'off') return <ColourTag colour={ANPR_IDLE.colour} label={short ? ANPR_IDLE.short : ANPR_IDLE.label} size={size} title={ANPR_IDLE.hint} />;
   if (!status) return <ColourTag colour="#6B7280" label={short ? 'on' : 'ANPR on'} size={size} title="ANPR enabled (processing state not reported)" />;
   const meta = ANPR_STATUS[status] ?? { colour: '#9CA3AF', label: `ANPR ${humanise(status)}`, short: humanise(status), hint: '' };
   return <ColourTag colour={meta.colour} label={short ? meta.short : meta.label} dot pulse={status === 'live'} size={size} title={meta.hint || undefined} />;

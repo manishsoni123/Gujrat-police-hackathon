@@ -195,7 +195,7 @@ on('POST', '/cameras', (_m, _u, init) => {
   nextId += 1;
   const dept = D.departments.find((d) => d.code === row.department_code) ?? D.departments[0];
   const base = D.cameras[0];
-  const c: Camera = { ...base, id: nextId, external_id: String(row.external_id), name: String(row.name), department_id: dept.id, department_code: dept.code, department_name: dept.name, type: (row.type as Camera['type']) ?? 'ip', ownership: (row.ownership as Camera['ownership']) ?? 'govt_dept', lat: (row.lat as number) ?? null, lon: (row.lon as number) ?? null, address: (row.address as string) ?? null, district: (row.district as string) ?? null, police_station: (row.police_station as string) ?? null, rtsp_url: (row.rtsp_url as string) ?? null, relay_path: row.rtsp_url ? `cam_${nextId}` : null, codec: (row.codec as Camera['codec']) ?? 'UNKNOWN', source: (row.source as Camera['source']) ?? 'manual', created_via: (row.source as string) ?? 'manual', status: 'unknown', anpr_enabled: Boolean(row.anpr_enabled), anpr_status: row.anpr_enabled ? 'queued' : 'off', record_enabled: Boolean(row.record_enabled), live: null, created_at: D.iso(D.NOW_MS), updated_at: D.iso(D.NOW_MS), created_by: currentUser.id, created_by_username: currentUser.username, uptime_24h_pct: null, last_seen_at: null, whep_url: null, hls_url: null };
+  const c: Camera = { ...base, id: nextId, external_id: String(row.external_id), name: String(row.name), department_id: dept.id, department_code: dept.code, department_name: dept.name, type: (row.type as Camera['type']) ?? 'ip', ownership: (row.ownership as Camera['ownership']) ?? 'govt_dept', lat: (row.lat as number) ?? null, lon: (row.lon as number) ?? null, address: (row.address as string) ?? null, district: (row.district as string) ?? null, police_station: (row.police_station as string) ?? null, rtsp_url: (row.rtsp_url as string) ?? null, relay_path: row.rtsp_url ? `cam_${nextId}` : null, codec: (row.codec as Camera['codec']) ?? 'UNKNOWN', source: (row.source as Camera['source']) ?? 'manual', created_via: (row.source as string) ?? 'manual', status: 'unknown', anpr_enabled: Boolean(row.anpr_enabled), anpr_status: row.anpr_enabled && row.rtsp_url ? 'queued' : 'off', record_enabled: Boolean(row.record_enabled), live: null, created_at: D.iso(D.NOW_MS), updated_at: D.iso(D.NOW_MS), created_by: currentUser.id, created_by_username: currentUser.username, uptime_24h_pct: null, last_seen_at: null, whep_url: null, hls_url: null };
   D.cameras.push(c);
   D.cameraById.set(c.id, c);
   return { status: 201, body: c };
@@ -204,8 +204,10 @@ on('PUT', '/cameras/(\\d+)', (m, _u, init) => {
   const c = D.cameraById.get(Number(m[1]));
   if (!c) return err(404, 'not_found', 'Camera not found');
   Object.assign(c, body(init), { updated_at: D.iso(Date.now()) });
-  // a newly enabled camera waits for the worker's next config reload; a disabled one is off
-  c.anpr_status = !c.anpr_enabled ? 'off' : c.anpr_status && c.anpr_status !== 'off' ? c.anpr_status : 'queued';
+  // a newly enabled camera waits for the worker's next config reload; one the worker is never given
+  // (ANPR off, retired, no source URL - the /internal/anpr-config filter) is off
+  const anprEligible = c.anpr_enabled && c.status !== 'retired' && c.rtsp_url != null;
+  c.anpr_status = !anprEligible ? 'off' : c.anpr_status && c.anpr_status !== 'off' ? c.anpr_status : 'queued';
   return { body: c };
 });
 on('PUT', '/cameras/(\\d+)/maintenance', (m, _u, init) => {
@@ -219,6 +221,7 @@ on('DELETE', '/cameras/(\\d+)', (m) => {
   if (!c) return err(404, 'not_found', 'Camera not found');
   c.status = 'retired';
   c.retired_at = D.iso(Date.now());
+  c.anpr_status = 'off'; // a retired camera is never handed to the live worker
   return { status: 204 };
 });
 on('GET', '/cameras/(\\d+)/health', (m, url) => {
