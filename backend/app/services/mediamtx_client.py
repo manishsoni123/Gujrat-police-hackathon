@@ -18,6 +18,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -465,21 +466,31 @@ client = MediaMtxClient()
 # ---- playback server (CONTRACT §5.16, §8.5) -----------------------------------------------------
 
 
-def _rfc3339(dt) -> str:
+def _rfc3339(dt, *, round_up: bool = False) -> str:
+    """RFC 3339 UTC with millisecond precision (`2026-10-12T18:30:02.356Z`), the form playback URLs carry.
+
+    MediaMTX names recording files (and `/list` reports timespan starts) with microseconds, and `/get` serves from
+    the file whose start is <= the requested start. A start that precedes a recorded timespan by even 1 us selects
+    the file before the gap (or none, before the first file) and the playback server answers 404 "no recording
+    segments found" (v1.20.1, measured). Truncating a timespan start (`.355768` -> `.355`) did exactly that, so a
+    `/get` start uses `round_up=True`: a sub-millisecond remainder is carried up to the next millisecond (`.356`)
+    and the request is never earlier than the instant it was resolved from. The default (floor) is for `/list`
+    window starts."""
     from app.core.tz import to_utc
 
-    # Millisecond precision: MediaMTX lists segment starts with fractions, so a whole-second start can precede
-    # the segment by up to 999 ms and the playback server then answers "no recording segments found".
     u = to_utc(dt)
+    if round_up and u.microsecond % 1000:
+        u += timedelta(microseconds=1000 - u.microsecond % 1000)
     return u.strftime("%Y-%m-%dT%H:%M:%S") + f".{u.microsecond // 1000:03d}Z"
 
 
 async def playback_list(path: str, start, end) -> list[dict[str, Any]] | None:
-    """`GET {MEDIAMTX_PLAYBACK_URL}/list?path=&start=&end=` → [{start, duration, url}] or None when unavailable."""
+    """`GET {MEDIAMTX_PLAYBACK_URL}/list?path=&start=&end=` → [{start, duration, url}] or None when unavailable.
+    The window is rounded outwards to the millisecond so it never loses a sub-millisecond edge."""
     url = f"{settings.MEDIAMTX_PLAYBACK_URL.rstrip('/')}/list"
     try:
         async with httpx.AsyncClient(timeout=8.0) as c:
-            r = await c.get(url, params={"path": path, "start": _rfc3339(start), "end": _rfc3339(end)})
+            r = await c.get(url, params={"path": path, "start": _rfc3339(start), "end": _rfc3339(end, round_up=True)})
     except httpx.HTTPError as exc:
         log.warning("playback list failed for %s: %s", path, exc)
         return None
@@ -493,13 +504,14 @@ async def playback_list(path: str, start, end) -> list[dict[str, Any]] | None:
 
 
 def playback_get_url(path: str, start, duration_s: float) -> str:
-    """Internal (server-side) URL of a playback segment."""
-    return f"{settings.MEDIAMTX_PLAYBACK_URL.rstrip('/')}/get?path={path}&start={_rfc3339(start)}&duration={int(duration_s)}&format=mp4"
+    """Internal (server-side) URL of a playback segment (start rounded up to the millisecond, see `_rfc3339`)."""
+    return f"{settings.MEDIAMTX_PLAYBACK_URL.rstrip('/')}/get?path={path}&start={_rfc3339(start, round_up=True)}&duration={int(duration_s)}&format=mp4"
 
 
 def public_playback_url(path: str, start, duration_s: float) -> str:
-    """Browser URL through Caddy (`/playback/*`, forward_auth)."""
-    return f"/playback/get?path={path}&start={_rfc3339(start)}&duration={int(duration_s)}&format=mp4"
+    """Browser URL through Caddy (`/playback/*`, forward_auth); start rounded up to the millisecond like
+    `playback_get_url`, so a segment's own URL plays instead of answering 404."""
+    return f"/playback/get?path={path}&start={_rfc3339(start, round_up=True)}&duration={int(duration_s)}&format=mp4"
 
 
 async def playback_download(path: str, start, duration_s: float, max_bytes: int = 500 * 1024 * 1024):
