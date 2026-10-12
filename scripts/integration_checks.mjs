@@ -64,6 +64,114 @@ async function camerasByExt(token) {
   return m;
 }
 
+// --- pure helpers (exported for ad-hoc tests; importing the module does not run a phase on Node >= 24.2) ---
+// `GET /api/settings` returns every secret as this mask; a PUT of the mask means "unchanged" (settings_service).
+export const SECRET_MASK = '********';
+// Bundled MediaMTX paths `stream/<n>` loop media/synthetic/cam_<n>.mp4 (drawn plates, no real COCO objects).
+export const MOCK_STREAM_RE = /^rtsp:\/\/mediamtx:8554\/stream\/\d+$/;
+/** URL credentials are never printed: `rtsp://user:secret@host/x` -> `rtsp://user:***@host/x`. */
+export function maskUrl(u) {
+  return String(u ?? '').replace(/([a-z][a-z0-9+.\-]*:\/\/[^\s/:@]+:)[^\s@]*@/gi, '$1***@');
+}
+/** `GET /api/settings` items -> `{key: value}` for `keys` (undefined when a key is absent). */
+export function settingValues(items, keys) {
+  const byKey = new Map((Array.isArray(items) ? items : []).map((i) => [i?.key, i?.value]));
+  return Object.fromEntries(keys.map((k) => [k, byKey.has(k) ? byKey.get(k) : undefined]));
+}
+/** Same stored setting: the URL validator trims and drops a trailing `/`, so compare strings that way. */
+export function sameSetting(a, b) {
+  const norm = (v) => (typeof v === 'string' ? v.trim().replace(/\/+$/, '') : JSON.stringify(v ?? null));
+  return a !== undefined && b !== undefined && norm(a) === norm(b);
+}
+/** `{key: original}` for every touched key whose current value differs from the original; an unknown original or a
+ *  masked secret is never written back (the mask would mean "unchanged" anyway). */
+export function restorePlan(original, current, touched) {
+  const plan = {};
+  for (const k of touched) {
+    const o = original?.[k];
+    if (o === undefined || o === SECRET_MASK) continue;
+    if (!sameSetting(current?.[k], o)) plan[k] = o;
+  }
+  return plan;
+}
+/** A synthetic mock camera: a `sandbox` camera whose (external_id, rtsp_url) is an item of the built-in mock
+ *  catalogue (`GET /api/mock-sandbox/api/ingest`) and whose stream is a bundled `stream/<n>` synthetic loop. */
+export function isSyntheticMockCamera(cam, mockCatalogue) {
+  if (!cam || cam.source !== 'sandbox' || !MOCK_STREAM_RE.test(String(cam.rtsp_url ?? ''))) return false;
+  return (Array.isArray(mockCatalogue) ? mockCatalogue : []).some((it) => it != null && String(it.id) === String(cam.external_id) && it.rtsp_url === cam.rtsp_url);
+}
+/** `GET /api/object-counts` shape (CONTRACT §5.17): `items` list + `totals` object (possibly empty). */
+export function objectCountsShapeOk(d) {
+  return d != null && Array.isArray(d.items) && d.totals != null && typeof d.totals === 'object' && !Array.isArray(d.totals);
+}
+
+// check 24 (phase b): settings + catalogue test, always against the built-in mock catalogue. With catalogue.source =
+// sentinel_portal (or generic_json) the catalogue test and the import would ignore the bad base_url and go to the
+// organiser sandbox instead (a cam01 probe, then a probe of every catalogue camera through a relay that refuses bursts),
+// so the source is switched to `mock` for the duration of the check. Every value the check changes (catalogue.source,
+// catalogue.base_url) is put back afterwards to what GET /api/settings returned before it started, also after a failure.
+const MOCK_BASE_URL = 'http://api:8000/mock-sandbox'; // the mock catalogue inside the compose network (CONTRACT §5.22)
+const CATALOGUE_KEYS = ['catalogue.source', 'catalogue.base_url'];
+const SETTINGS_CHECK = 'settings: bad catalogue URL -> test ok:false, import 502 upstream_error; restore works; password masked';
+const RESTORE_CHECK = 'settings: catalogue.source + catalogue.base_url restored to their values from before the check';
+export async function checkCatalogueSettings(A) {
+  const before = await req('GET', '/api/settings', { token: A });
+  const orig = settingValues(before.data?.items, CATALOGUE_KEYS);
+  const mock = await req('GET', '/api/mock-sandbox/api/ingest');
+  const mockOk = mock.status === 200 && Array.isArray(mock.data) && mock.data.length === 50;
+  if (before.status !== 200 || CATALOGUE_KEYS.some((k) => orig[k] === undefined) || !mockOk) {
+    check(SETTINGS_CHECK, false, `not run, settings untouched: GET /api/settings ${before.status} source=${orig['catalogue.source']}; mock catalogue ${mock.status} items=${Array.isArray(mock.data) ? mock.data.length : '-'} (needs MOCK_SANDBOX=1)`);
+    return;
+  }
+  const touched = new Set();
+  const put = (values) => {
+    for (const k of Object.keys(values)) if (CATALOGUE_KEYS.includes(k)) touched.add(k);
+    return req('PUT', '/api/settings', { token: A, json: { values } });
+  };
+  try {
+    if (orig['catalogue.source'] !== 'mock') {
+      const ps = await put({ 'catalogue.source': 'mock' });
+      const nowSource = settingValues(ps.data?.items, ['catalogue.source'])['catalogue.source'];
+      if (ps.status !== 200 || nowSource !== 'mock') {
+        check(SETTINGS_CHECK, false, `not run: PUT catalogue.source=mock -> ${ps.status} (source now ${nowSource}); no catalogue test or import was sent`);
+        return;
+      }
+    }
+    // Both imports are dry runs: the check is about the catalogue fetch (phase a covers the upsert), and a dry run
+    // cannot add the 50 mock cameras to a database that holds other cameras.
+    const putBad = await put({ 'catalogue.base_url': 'http://api:8000/nowhere', 'catalogue.auth_password': SECRET_MASK });
+    const test = await req('POST', '/api/settings/catalogue/test', { token: A, json: {} });
+    const impBad = await req('POST', '/api/cameras/import/sandbox', { token: A, json: { dry_run: true } });
+    const putGood = await put({ 'catalogue.base_url': MOCK_BASE_URL });
+    const test2 = await req('POST', '/api/settings/catalogue/test', { token: A, json: {} });
+    const impGood = await req('POST', '/api/cameras/import/sandbox', { token: A, json: { dry_run: true } });
+    const sget = await req('GET', '/api/settings', { token: A });
+    const pw = (sget.data?.items ?? []).find((i) => i.key === 'catalogue.auth_password');
+    check(SETTINGS_CHECK, putBad.status === 200 && test.data?.ok === false && impBad.status === 502 && impBad.data?.code === 'upstream_error' && /nowhere/.test(impBad.data?.detail ?? '') && putGood.status === 200 && test2.data?.ok === true && test2.data?.count === 50 && impGood.status === 200 && impGood.data?.unchanged === 50 && (pw?.value === SECRET_MASK || pw?.value === ''), `source ${orig['catalogue.source']}${orig['catalogue.source'] !== 'mock' ? ' -> mock' : ''} test=${JSON.stringify(test.data).slice(0, 80)} import=${impBad.status} ${impBad.data?.detail?.slice(0, 60)} restored=${impGood.data?.unchanged} pw=${JSON.stringify(pw?.value)}`);
+  } catch (e) {
+    check(SETTINGS_CHECK, false, `crashed: ${e.message}`);
+  } finally {
+    await restoreCatalogueSettings(A, orig, touched);
+  }
+}
+async function restoreCatalogueSettings(A, orig, touched) {
+  if (!touched.size) return;
+  const byHand = `restore by hand in Settings -> Catalogue: catalogue.source = "${orig['catalogue.source']}", catalogue.base_url = ${maskUrl(orig['catalogue.base_url'])}`;
+  try {
+    const cur = await req('GET', '/api/settings', { token: A });
+    const plan = restorePlan(orig, cur.status === 200 ? settingValues(cur.data?.items, [...touched]) : {}, touched);
+    const put = Object.keys(plan).length ? await req('PUT', '/api/settings', { token: A, json: { values: plan } }) : null;
+    const after = await req('GET', '/api/settings', { token: A });
+    const back = settingValues(after.data?.items, CATALOGUE_KEYS);
+    const ok = after.status === 200 && CATALOGUE_KEYS.every((k) => sameSetting(back[k], orig[k]));
+    check(RESTORE_CHECK, ok, `source ${orig['catalogue.source']} -> ${back['catalogue.source']}; base_url ${maskUrl(orig['catalogue.base_url'])} -> ${maskUrl(back['catalogue.base_url'])}; restore PUT ${put ? `${put.status} [${Object.keys(plan).join(',')}]` : 'not needed'}`);
+    if (!ok) console.log(`  !! ${byHand}`);
+  } catch (e) {
+    check(RESTORE_CHECK, false, `restore crashed: ${e.message}`);
+    console.log(`  !! ${byHand}`);
+  }
+}
+
 async function phaseA() {
   const admin = await login('jury_admin', 'Sentinel@Admin2026');
   check('login admin 200 + cookie', admin.user.role === 'admin' && /sg_session=/.test(admin.cookie) && /HttpOnly/i.test(admin.cookie), admin.cookie.slice(0, 90));
@@ -451,8 +559,21 @@ async function phaseB() {
   // Object detection is off in the laptop demo profile (OBJECT_DETECT=0): the worker item then reports no object
   // weights (`extra.object_weights == null`) and the synthetic drawings hold no COCO objects anyway (CONTRACT §1.3 amendment).
   const objOff = wk?.object_detect === false || (wk?.extra != null && wk.extra.object_weights == null);
+  // With object detection on (GPU profile) the totals are just as legitimately empty while every camera the live
+  // worker reads is a synthetic mock camera; one real camera in its set (own camera, organiser sandbox) must produce counts.
+  const liveIds = (wk?.camera_states ?? []).map((c) => c.id);
+  let liveSynthetic = 0;
+  if (!objOff && liveIds.length) {
+    const mockCat = await req('GET', '/api/mock-sandbox/api/ingest');
+    for (const id of liveIds) {
+      const cam = mockCat.status === 200 ? await req('GET', `/api/cameras/${id}`, { token: A }) : null;
+      if (cam?.status === 200 && isSyntheticMockCamera(cam.data, mockCat.data)) liveSynthetic += 1;
+    }
+  }
+  const liveInfo = `live_cameras=${liveIds.join(',')} synthetic_mock=${liveSynthetic}/${liveIds.length}`;
   if (objOff) check('object counts endpoint (object detection off on this worker: synthetic drawings hold no COCO objects)', oc.status === 200 && oc.data && 'totals' in oc.data, `object_weights=${wk?.extra?.object_weights} totals=${JSON.stringify(oc.data?.totals)}`);
-  else check('object counts', oc.status === 200 && Object.keys(oc.data.totals ?? {}).length > 0, JSON.stringify(oc.data?.totals));
+  else if (liveIds.length && liveSynthetic === liveIds.length) check('object counts endpoint (object detection on, but every live-worker camera is a synthetic mock loop: no COCO objects, empty totals accepted)', oc.status === 200 && objectCountsShapeOk(oc.data), `${liveInfo} items=${oc.data?.items?.length} totals=${JSON.stringify(oc.data?.totals)}`);
+  else check('object counts', oc.status === 200 && Object.keys(oc.data?.totals ?? {}).length > 0, `${JSON.stringify(oc.data?.totals)} ${liveInfo}`);
   check('health summary anpr worker', Boolean(wk) && wk.stale === false && wk.cameras >= 4, JSON.stringify(wk));
   const allAlerts = (await req('GET', '/api/alerts?status=new,acknowledged,closed&type=watchlist_hit&page_size=200', { token: A })).data.items;
   const lat = allAlerts.map((x) => x.latency_ms).filter((x) => typeof x === 'number').sort((x, y) => x - y);
@@ -466,16 +587,8 @@ async function phaseB() {
   const need = ['auth.login', 'camera.import_sandbox', 'vehicle.search', 'vehicle.route', 'vehicle.confirm', 'report.route', 'report.detections', 'report.quality', 'camera.export', 'alert.ack', 'watchlist.create', 'clip.create', 'evidence.verify'];
   check('audit covers login/import/search/route/export/ack', need.every((x) => acts.has(x)), `missing=${need.filter((x) => !acts.has(x)).join(',')}`);
 
-  // check 24: settings + catalogue test
-  const putBad = await req('PUT', '/api/settings', { token: A, json: { values: { 'catalogue.base_url': 'http://api:8000/nowhere', 'catalogue.auth_password': '********' } } });
-  const test = await req('POST', '/api/settings/catalogue/test', { token: A, json: {} });
-  const impBad = await req('POST', '/api/cameras/import/sandbox', { token: A, json: {} });
-  const putGood = await req('PUT', '/api/settings', { token: A, json: { values: { 'catalogue.base_url': 'http://api:8000/mock-sandbox' } } });
-  const test2 = await req('POST', '/api/settings/catalogue/test', { token: A, json: {} });
-  const impGood = await req('POST', '/api/cameras/import/sandbox', { token: A, json: {} });
-  const sget = await req('GET', '/api/settings', { token: A });
-  const pw = (sget.data?.items ?? []).find((i) => i.key === 'catalogue.auth_password');
-  check('settings: bad catalogue URL -> test ok:false, import 502 upstream_error; restore works; password masked', putBad.status === 200 && test.data?.ok === false && impBad.status === 502 && impBad.data?.code === 'upstream_error' && /nowhere/.test(impBad.data?.detail ?? '') && putGood.status === 200 && test2.data?.ok === true && test2.data?.count === 50 && impGood.status === 200 && impGood.data?.unchanged === 50 && (pw?.value === '********' || pw?.value === ''), `test=${JSON.stringify(test.data).slice(0, 80)} import=${impBad.status} ${impBad.data?.detail?.slice(0, 60)} restored=${impGood.data?.unchanged} pw=${JSON.stringify(pw?.value)}`);
+  // check 24: settings + catalogue test (mock catalogue only; original catalogue settings restored afterwards)
+  await checkCatalogueSettings(A);
   check('settings unknown key 422', (await req('PUT', '/api/settings', { token: A, json: { values: { 'nope.key': 1 } } })).status === 422);
   check('viewer GET /settings 403', (await req('GET', '/api/settings', { token: vw.token })).status === 403);
 
@@ -513,11 +626,14 @@ async function phaseB() {
   saveMeas();
 }
 
-try {
-  if (phase === 'a') await phaseA(); else await phaseB();
-} catch (e) {
-  check(`phase ${phase} crashed`, false, e.stack ?? String(e));
+// `import.meta.main` is false only when another module imports this file (Node >= 24.2); undefined on older Node -> run.
+if (import.meta.main !== false) {
+  try {
+    if (phase === 'a') await phaseA(); else await phaseB();
+  } catch (e) {
+    check(`phase ${phase} crashed`, false, e.stack ?? String(e));
+  }
+  const failed = results.filter((r) => !r[1]);
+  console.log(`\n${results.length - failed.length} passed, ${failed.length} failed${failed.length ? ': ' + failed.map((f) => f[0]).join(' | ') : ''}`);
+  process.exit(failed.length ? 1 : 0);
 }
-const failed = results.filter((r) => !r[1]);
-console.log(`\n${results.length - failed.length} passed, ${failed.length} failed${failed.length ? ': ' + failed.map((f) => f[0]).join(' | ') : ''}`);
-process.exit(failed.length ? 1 : 0);
