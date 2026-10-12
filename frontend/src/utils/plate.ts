@@ -71,7 +71,10 @@ export function normalisePlate(raw: string): NormResult {
       series.split('').map(fixLetter).join('') +
       s.slice(-4).split('').map(fixDigit).join('');
     if (!STANDARD.test(built)) continue;
-    if (k === 1 && built[2] === '0') continue;
+    // The k district chars must all be digits after fixDigit and not district 0 / 00; otherwise a
+    // k=2 candidate like GL0AEL2866 (from GLOAEL2866) passes STANDARD re-parsed as district 0.
+    const district = built.slice(2, 2 + k);
+    if (!/^[0-9]+$/.test(district) || Number(district) === 0) continue;
     const cand = fixState(built);
     if (cand === null) continue;
     const subs = countSubs(cand, s);

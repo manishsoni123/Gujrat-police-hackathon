@@ -22,6 +22,7 @@ TO_DIGIT = {"O": "0", "I": "1", "S": "5", "B": "8", "Z": "2", "G": "6", "Q": "0"
 
 MAX_SUBSTITUTIONS = 2
 _NON_ALNUM = re.compile(r"[^A-Z0-9]")
+_DIGITS = re.compile(r"[0-9]+")
 
 # Registration state / UT codes (MoRTH). 28 states + 8 UTs, plus legacy codes still on the road:
 # TS (Telangana until 2024, now TG), OR (Odisha until 2012, now OD), UA (Uttarakhand until 2007,
@@ -65,6 +66,15 @@ def _count_subs(cand: str, s: str) -> int:
     return sum(1 for a, b in zip(cand, s) if a != b)
 
 
+def _real_district(district: str) -> bool:
+    """Step 5: the k district characters are all digits after ``fix_digit`` and not district 0/00.
+
+    Without this a k=2 candidate whose second district char is a letter ``fix_digit`` cannot map
+    (``GLOAEL2866 -> GL0AEL2866``) slips through ``STANDARD`` re-parsed as district ``0``.
+    """
+    return _DIGITS.fullmatch(district) is not None and int(district) != 0
+
+
 def fix_state(cand: str) -> str | None:
     """Step 5a: a known state code is kept; else the unique one-glyph ``STATE_FIX`` that yields one."""
     if cand[:2] in STATE_CODES:
@@ -81,8 +91,8 @@ def fix_state(cand: str) -> str | None:
 def _standard_candidates(s: str) -> list[tuple[int, str, int]]:
     """Step 5: position-aware candidates for k = 2 and k = 1 district digits.
 
-    Returns ``(subs, cand, k)`` for every k that yields a valid standard plate with a real state
-    code (step 5a), k=2 first.
+    Returns ``(subs, cand, k)`` for every k that yields a valid standard plate with k real
+    district digits (not 0 / 00) and a real state code (step 5a), k=2 first.
     """
     out: list[tuple[int, str, int]] = []
     mid = s[2:-4]
@@ -99,8 +109,8 @@ def _standard_candidates(s: str) -> list[tuple[int, str, int]]:
         )
         if not STANDARD.match(cand):
             continue
-        if k == 1 and cand[2] == "0":
-            continue  # there is no district 0
+        if not _real_district(cand[2:2 + k]):
+            continue  # a letter left in the district slot, or district 0 / 00
         cand = fix_state(cand)
         if cand is None:
             continue  # no real state code within one glyph

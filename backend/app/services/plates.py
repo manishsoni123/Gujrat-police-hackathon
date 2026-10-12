@@ -11,6 +11,7 @@ TO_DIGIT = {"O": "0", "I": "1", "S": "5", "B": "8", "Z": "2", "G": "6", "Q": "0"
 STANDARD = re.compile(r"^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$")
 BH = re.compile(r"^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$")
 _NON_ALNUM = re.compile(r"[^A-Z0-9]")
+_DIGITS = re.compile(r"[0-9]+")
 
 MAX_SUBS = 2
 
@@ -48,6 +49,15 @@ def _count_subs(a: str, b: str) -> int:
     return sum(1 for x, y in zip(a, b) if x != y)
 
 
+def _real_district(district: str) -> bool:
+    """The k district chars are all digits after fix_digit and not district 0/00.
+
+    Without this a k=2 candidate whose second district char is a letter fix_digit cannot map
+    (`GLOAEL2866 → GL0AEL2866`) slips through STANDARD re-parsed as district `0`.
+    """
+    return _DIGITS.fullmatch(district) is not None and int(district) != 0
+
+
 def fix_state(cand: str) -> str | None:
     """Known state code → unchanged; else the unique one-glyph STATE_FIX that yields one, else None."""
     if cand[:2] in STATE_CODES:
@@ -62,7 +72,8 @@ def fix_state(cand: str) -> str | None:
 
 
 def _standard_candidate(s: str) -> tuple[str, int] | None:
-    """Best standard-format candidate with a real state code (fewest substitutions, tie → k=2) or None."""
+    """Best standard-format candidate with real district digits and a real state code
+    (fewest substitutions, tie → k=2) or None."""
     if len(s) < 7:
         return None
     mid = s[2:-4]
@@ -83,8 +94,8 @@ def _standard_candidate(s: str) -> tuple[str, int] | None:
         )
         if not STANDARD.match(cand):
             continue
-        if k == 1 and cand[2] == "0":
-            continue  # district 0 does not exist
+        if not _real_district(cand[2 : 2 + k]):
+            continue  # a letter left in the district slot, or district 0 / 00
         fixed = fix_state(cand)
         if fixed is None:
             continue  # no real state code within one glyph
