@@ -418,7 +418,7 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
     # Own caps, not the CPU twin's (CUDA runtime + onnxruntime-gpu add host RSS).
     # Memory ~ 2 GiB + 0.45 GiB per simultaneous decoder (each `ffmpeg -hwaccel
-    # cuda` holds 0.29-0.42 GiB anon+shmem; deploy/.env.example). The 8g fallback
+    # cuda` holds 0.29-0.44 GiB anon+shmem; deploy/.env.example). The 8g fallback
     # matches this service's ANPR_MAX_CAMERAS default of 12 (2 + 12 x 0.45 = 7.4).
     # CPU: 8 cameras used 4.6-5.7 cores on 12-13 Oct, so 12 cameras at 5 fps will
     # be throttled at 6 (lower fps_actual, not a crash); cpus must be <= host CPUs.
