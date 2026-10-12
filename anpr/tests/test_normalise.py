@@ -66,6 +66,40 @@ def test_state_vectors(raw, plate_norm, valid, pattern, subs):
     assert result.substitutions == subs
 
 
+# Step 5 district-slot vectors (CONTRACT amendment 2026-10-13), mirrored in backend/tests: the k
+# district chars must all be digits after fix_digit and must not be district 0 / 00.
+DISTRICT_VECTORS = [
+    ("GLOAE L2866", "GLOAEL2866", False, None, 0),  # k=2 "0A" is not digits; k=1 is district 0
+    ("GJ00AB1234", "GJ00AB1234", False, None, 0),  # district 00
+    ("GJOOAB1234", "GJOOAB1234", False, None, 0),  # OO -> district 00
+    ("GJ0DAB1234", "GJ0DAB1234", False, None, 0),  # 0D -> district 00
+    ("GJ0AB1234", "GJ0AB1234", False, None, 0),  # k=2 "0A" is not digits; k=1 is district 0
+    ("DL0CAF5030", "DL0CAF5030", False, None, 0),  # k=2 "0C" is not digits; k=1 is district 0
+    ("GJ1AB1234", "GJ1AB1234", True, "standard", 0),
+    ("GJIAB1234", "GJ1AB1234", True, "standard", 1),  # mappable letter, one-digit district
+    ("GJ01AB1234", "GJ01AB1234", True, "standard", 0),
+    ("GJ10AB1234", "GJ10AB1234", True, "standard", 0),
+    ("MH12DE1403", "MH12DE1403", True, "standard", 0),
+    ("GJO1AB1234", "GJ01AB1234", True, "standard", 1),  # mappable letter, two-digit district
+]
+
+
+@pytest.mark.parametrize("raw,plate_norm,valid,pattern,subs", DISTRICT_VECTORS)
+def test_district_vectors(raw, plate_norm, valid, pattern, subs):
+    result = normalise(raw)
+    assert result.plate_norm == plate_norm
+    assert result.is_valid_format is valid
+    assert result.pattern == pattern
+    assert result.substitutions == subs
+
+
+def test_district_zero_is_never_valid():
+    # district 0 / 00, read directly or through fix_digit (Q, D, O -> 0), for every series length
+    for raw in ("GJ0A1234", "GJ0ABC1234", "GJ00A1234", "MH00Z1234", "TN0QA1234"):
+        r = normalise(raw)
+        assert (r.plate_norm, r.is_valid_format, r.pattern, r.substitutions) == (raw, False, None, 0)
+
+
 def test_state_codes_cover_states_uts_and_legacy():
     from anpr.normalise import STATE_CODES
 

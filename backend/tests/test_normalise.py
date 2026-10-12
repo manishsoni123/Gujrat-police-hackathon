@@ -65,6 +65,40 @@ def test_state_vectors(raw: str, expected: str, valid: bool, pattern: str | None
     assert r.substitutions == subs
 
 
+# Step 5 district-slot vectors (CONTRACT amendment 2026-10-13), mirrored in anpr/tests: the k
+# district chars must all be digits after fix_digit and must not be district 0 / 00.
+DISTRICT_VECTORS = [
+    ("GLOAE L2866", "GLOAEL2866", False, None, 0),  # k=2 "0A" is not digits; k=1 is district 0
+    ("GJ00AB1234", "GJ00AB1234", False, None, 0),  # district 00
+    ("GJOOAB1234", "GJOOAB1234", False, None, 0),  # OO -> district 00
+    ("GJ0DAB1234", "GJ0DAB1234", False, None, 0),  # 0D -> district 00
+    ("GJ0AB1234", "GJ0AB1234", False, None, 0),  # k=2 "0A" is not digits; k=1 is district 0
+    ("DL0CAF5030", "DL0CAF5030", False, None, 0),  # k=2 "0C" is not digits; k=1 is district 0
+    ("GJ1AB1234", "GJ1AB1234", True, "standard", 0),
+    ("GJIAB1234", "GJ1AB1234", True, "standard", 1),  # mappable letter, one-digit district
+    ("GJ01AB1234", "GJ01AB1234", True, "standard", 0),
+    ("GJ10AB1234", "GJ10AB1234", True, "standard", 0),
+    ("MH12DE1403", "MH12DE1403", True, "standard", 0),
+    ("GJO1AB1234", "GJ01AB1234", True, "standard", 1),  # mappable letter, two-digit district
+]
+
+
+@pytest.mark.parametrize("raw,expected,valid,pattern,subs", DISTRICT_VECTORS)
+def test_district_vectors(raw: str, expected: str, valid: bool, pattern: str | None, subs: int) -> None:
+    r = normalise(raw)
+    assert r.plate_norm == expected
+    assert r.is_valid_format is valid
+    assert r.pattern == pattern
+    assert r.substitutions == subs
+
+
+def test_district_zero_is_never_valid() -> None:
+    # district 0 / 00, read directly or through fix_digit (Q, D, O -> 0), for every series length
+    for raw in ("GJ0A1234", "GJ0ABC1234", "GJ00A1234", "MH00Z1234", "TN0QA1234"):
+        r = normalise(raw)
+        assert (r.plate_norm, r.is_valid_format, r.pattern, r.substitutions) == (raw, False, None, 0)
+
+
 def test_two_line_join_with_dot_and_middle_dot() -> None:
     assert normalise("MH 02\n·BZ 7788").plate_norm == "MH02BZ7788"
     assert normalise("22 BH\n4321 AA").plate_norm == "22BH4321AA"
