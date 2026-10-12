@@ -13,7 +13,13 @@ Per decoded frame (newest frame per camera only - older frames are dropped, neve
     voter.expire   -> accepted reads -> sightings -> pending batch
     YOLOX every Nth frame -> tracker -> per-minute counts / intrusion events (live mode)
     snapshot every SNAPSHOT_INTERVAL_S (live mode)
-    batch POST /internal/detections every POST_BATCH_S per camera when there is anything to send
+    batch POST /internal/detections every POST_BATCH_S per camera when there is anything to send;
+    a batch holding a valid-format read is sent at once (see ``Pipeline._flush_if_urgent``)
+
+The camera's vote expiry runs right after its frame is processed (``Pipeline._after_frame``) as
+well as once per loop for every camera, so a read whose window has elapsed does not wait for the
+other cameras' frames - the watchlist alert latency (``alerts.latency_ms``) is measured from the
+read's ``captured_at``.
 
 Discontinuities (PTS jump back or decoder restart) flush the camera's vote buckets, close its
 open sightings, reset its object tracker and emit a ``loop_reset`` event.
@@ -126,6 +132,7 @@ class PendingBatch:
     reads: list[VotedRead] = field(default_factory=list)
     object_counts: list[dict[str, Any]] = field(default_factory=list)
     events: list[tuple[dict[str, Any], bytes | None]] = field(default_factory=list)
+    urgent: bool = False        # holds a valid-format (alertable) read: sent now, not on the next POST_BATCH_S tick
 
     def empty(self) -> bool:
         return not (self.reads or self.object_counts or self.events)
@@ -655,6 +662,8 @@ class Pipeline:
                 s.best_frame_jpeg = jpeg_under(frame_img, FRAME_MAX_BYTES, quality=80)
             read.frame = None
             cam.pending.reads.append(read)
+            if read.is_valid_format:
+                cam.pending.urgent = True     # only valid-format reads can raise a watchlist alert
             cam.reads += 1
             log.info("camera %s: read %s conf=%.2f votes=%d valid=%s sighting=%s", cam.cfg.id, read.plate_norm,
                      read.confidence, read.votes, read.is_valid_format, s.key)
@@ -695,15 +704,67 @@ class Pipeline:
             event["stream_pts_after"] = round(after, 3)
         cam.pending.events.append((event, None))
 
+    def _tick_camera(self, cam: CameraWorker, now: datetime) -> None:
+        """Discontinuities, then vote-window expiry, of one camera; accepted reads join its pending batch."""
+        for reason, before, after in cam.take_discontinuities():
+            self._handle_discontinuity(cam, reason, before, after)
+        self._accept_reads(cam, self.voter.expire(now, cam.cfg.id))
+
+    def _flush_if_urgent(self, cam: CameraWorker, mono: float) -> bool:
+        """Send the camera's batch now when it holds a valid-format read (alert latency).
+
+        Waiting for the next ``POST_BATCH_S`` tick held an accepted read for up to a period plus a
+        loop iteration (accept -> API ingest p95 1.2 s on the 12 Oct live run) before it could
+        raise its watchlist alert. Only alertable reads jump the queue; invalid-format reads, sighting
+        closures, counts and events keep the periodic batch. The periodic timer restarts, so the
+        next periodic batch of this camera is still at least ``POST_BATCH_S`` away.
+        """
+        if not cam.pending.urgent:
+            return False
+        cam.last_flush_mono = mono
+        self._flush(cam, self.sightings.drain_dirty(cam.cfg.id))
+        return True
+
+    def _after_frame(self, cam: CameraWorker) -> None:
+        """Per-camera tick right after the camera's frame was processed.
+
+        A track that ended in this frame was just OCR'd; its bucket's window (measured on
+        ``captured_at``) has usually elapsed already, and the once-per-loop tick would hold the
+        read until every other camera's frame was processed (p50 0.25 s, p95 1.3 s measured with
+        16 cameras). Only this camera's buckets are touched, its pending discontinuities are
+        handled first exactly as in the loop tick, and its buckets only change when its own frame
+        is processed - so a bucket that has expired here would have been emitted with the same
+        members by the loop tick; it is just emitted sooner. (A decoder restart reported in the
+        fraction of a second between the two ticks votes its final track OCR in a fresh bucket,
+        as it already does when it arrives just after the loop tick.)
+        """
+        self._tick_camera(cam, datetime.now(timezone.utc))
+        self._flush_if_urgent(cam, time.monotonic())
+
+    def _process_ready_frames(self) -> bool:
+        """Process the newest frame of every camera that has one; True when any frame was processed."""
+        busy = False
+        for cam in list(self.cameras.values()):
+            frame = cam.take_frame()
+            if frame is None:
+                continue
+            busy = True
+            try:
+                self.process_frame(cam, frame)
+            except Exception:  # noqa: BLE001 - one bad frame must not stop the worker
+                log.exception("camera %s: frame processing failed", cam.cfg.id)
+            self._after_frame(cam)
+        return busy
+
     def _tick_time_based(self, now: datetime) -> None:
         """Vote-window expiry, sighting closure and batch flushes for every camera."""
         for cam in list(self.cameras.values()):
-            for reason, before, after in cam.take_discontinuities():
-                self._handle_discontinuity(cam, reason, before, after)
-            self._accept_reads(cam, self.voter.expire(now, cam.cfg.id))
+            self._tick_camera(cam, now)
         self.sightings.expire(now)
         mono = time.monotonic()
         for cam in list(self.cameras.values()):
+            if self._flush_if_urgent(cam, mono):
+                continue
             if mono - cam.last_flush_mono < self.settings.post_batch_s:
                 continue
             cam.last_flush_mono = mono
@@ -829,16 +890,7 @@ class Pipeline:
                     desired, self._desired = self._desired, None
                 if desired is not None:
                     self.reconcile(desired)
-                busy = False
-                for cam in list(self.cameras.values()):
-                    frame = cam.take_frame()
-                    if frame is None:
-                        continue
-                    busy = True
-                    try:
-                        self.process_frame(cam, frame)
-                    except Exception:  # noqa: BLE001 - one bad frame must not stop the worker
-                        log.exception("camera %s: frame processing failed", cam.cfg.id)
+                busy = self._process_ready_frames()
                 self._tick_time_based(datetime.now(timezone.utc))
                 if self.sender.fatal is not None:
                     exit_code = 3
