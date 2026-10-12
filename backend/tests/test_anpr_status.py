@@ -1,7 +1,7 @@
-"""Camera `anpr_status` (CONTRACT Amendments 2026-10-13): the real live-ANPR processing state, not `anpr_enabled`.
+"""Camera `anpr_status` (CONTRACT Amendments 2026-10-13): the real live-ANPR processing state.
 
-Regression: on 12 Oct camera 81 showed "ANPR live" while no worker processed it — 13 cameras were enabled and the
-live worker only takes the lowest-id `ANPR_MAX_CAMERAS` (8) of them.
+Regression: on 12 Oct camera 81 showed "ANPR live" while no worker processed it - 13 cameras
+were enabled and the live worker only takes the lowest-id `ANPR_MAX_CAMERAS` (8) of them.
 """
 
 from __future__ import annotations
@@ -10,63 +10,97 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import pytest
+
+from app.api import cameras as cameras_api
 from app.core.config import settings
 from app.db.models import Camera
 from app.services import serializers
-from app.services.health_poller import heartbeat_stale, live_anpr_view
+from app.services.health_poller import heartbeat_stale
 from app.services.serializers import AnprLiveView, anpr_live_view, anpr_status
 
 NOW = datetime(2026, 10, 12, 19, 0, tzinfo=timezone.utc)
 
 
-def _cam(cid: int, enabled: bool = True, status: str = "online", url: str | None = "rtsp://relay/x") -> Camera:
+def _cam(
+    cid: int, enabled: bool = True, status: str = "online", url: str | None = "rtsp://relay/x",
+) -> Camera:
     return Camera(
-        id=cid, source="manual", external_id=str(cid), name=f"cam {cid}", department_id=1, type="ip", ownership="govt_dept",
-        rtsp_url=url, codec="H264", status=status, maintenance_status="ok", anpr_enabled=enabled, record_enabled=False,
+        id=cid, source="manual", external_id=str(cid), name=f"cam {cid}", department_id=1,
+        type="ip", ownership="govt_dept", rtsp_url=url, codec="H264", status=status,
+        maintenance_status="ok", anpr_enabled=enabled, record_enabled=False,
         created_via="manual", created_at=NOW, updated_at=NOW,
     )
 
 
 def _entry(cid: Any, state: str | None = "running") -> dict[str, Any]:
-    e: dict[str, Any] = {"id": cid, "fps_actual": 4.0, "frames": 100, "reads": 0, "decoder_restarts": 0, "last_error": None}
+    e: dict[str, Any] = {
+        "id": cid, "fps_actual": 4.0, "frames": 100, "reads": 0, "decoder_restarts": 0,
+        "last_error": None,
+    }
     if state is not None:
         e["state"] = state
     return e
 
 
-# ---- anpr_live_view ----------------------------------------------------------------------------------------------
+# ---- anpr_live_view -----------------------------------------------------------------------
 def test_live_view_maps_decoder_states() -> None:
-    view = anpr_live_view([[_entry(1), _entry(2, "starting"), _entry(3, "reconnecting"), _entry(4, "error"), _entry(5, "stopped"), _entry(6, "weird"), _entry(7, None)]])
+    view = anpr_live_view([[
+        _entry(1), _entry(2, "starting"), _entry(3, "reconnecting"), _entry(4, "error"),
+        _entry(5, "stopped"), _entry(6, "weird"), _entry(7, None),
+    ]])
     assert view.workers == 1
-    assert view.states == {1: "live", 2: "starting", 3: "reconnecting", 4: "reconnecting", 6: "reconnecting", 7: "live"}
+    assert view.states == {
+        1: "live", 2: "starting", 3: "reconnecting", 4: "reconnecting", 6: "reconnecting",
+        7: "live",
+    }
     assert 5 not in view.states  # a stopped decoder is not processing
 
 
 def test_live_view_keeps_the_best_state_across_workers() -> None:
-    view = anpr_live_view([[_entry(1, "reconnecting"), _entry(2)], [_entry(1), _entry(2, "starting"), _entry(3, "reconnecting")], [_entry(3, "starting")]])
+    view = anpr_live_view([
+        [_entry(1, "reconnecting"), _entry(2)],
+        [_entry(1), _entry(2, "starting"), _entry(3, "reconnecting")],
+        [_entry(3, "starting")],
+    ])
     assert view.workers == 3
     assert view.states == {1: "live", 2: "live", 3: "starting"}
 
 
 def test_live_view_drops_a_worker_that_sent_its_shutdown_heartbeat() -> None:
-    # Pipeline.shutdown posts one last heartbeat with every camera `stopped`; the row stays fresh for 3 × HEARTBEAT_S
+    # Pipeline.shutdown posts one last heartbeat with every camera `stopped`; the row then
+    # stays fresh for up to 3 x HEARTBEAT_S
     view = anpr_live_view([[_entry(1, "stopped"), _entry(2, "stopped")]])
     assert view.workers == 0 and view.states == {}
 
 
+def test_live_view_keeps_a_worker_with_some_cameras_still_running() -> None:
+    view = anpr_live_view([[_entry(1, "stopped"), _entry(2, "reconnecting")]])
+    assert view.workers == 1 and view.states == {2: "reconnecting"}
+
+
 def test_live_view_counts_an_idle_worker_and_skips_bad_entries() -> None:
-    view = anpr_live_view([[], None, [_entry("x"), _entry(None), "junk", _entry("9")]])  # type: ignore[list-item]
-    assert view.workers == 3  # an idle worker (no cameras yet) is up
+    bad: list[Any] = [_entry("x"), _entry(None), "junk", _entry("9")]
+    view = anpr_live_view([[], None, bad])
+    assert view.workers == 3  # an idle worker (no cameras handed to it yet) is up
     assert view.states == {9: "live"}
 
 
-# ---- anpr_status -------------------------------------------------------------------------------------------------
+# ---- anpr_status --------------------------------------------------------------------------
 def test_status_off_when_the_worker_is_never_handed_the_camera() -> None:
     view = AnprLiveView(1, {1: "live", 2: "live", 3: "live"})
     assert anpr_status(_cam(1, enabled=False), view) == "off"
-    assert anpr_status(_cam(2, status="retired"), view) == "off"  # /internal/anpr-config skips retired cameras
-    assert anpr_status(_cam(3, url=None), view) == "off"  # ... and cameras without a source URL
+    # /internal/anpr-config skips retired cameras ...
+    assert anpr_status(_cam(2, status="retired"), view) == "off"
+    # ... and cameras whose source URL IS NULL
+    assert anpr_status(_cam(3, url=None), view) == "off"
     assert anpr_status(_cam(1, enabled=False), None) == "off"
+
+
+def test_status_eligibility_mirrors_the_anpr_config_query() -> None:
+    # the config query tests `rtsp_url IS NOT NULL`, so a non-NULL URL is handed over
+    assert anpr_status(_cam(3, url=""), AnprLiveView(1, {3: "reconnecting"})) == "reconnecting"
+    assert anpr_status(_cam(4, status="offline"), AnprLiveView(1, {})) == "queued"
 
 
 def test_status_follows_the_worker_state() -> None:
@@ -75,7 +109,7 @@ def test_status_follows_the_worker_state() -> None:
 
 
 def test_status_queued_over_anpr_max_cameras() -> None:
-    """13 enabled cameras, cap 8: the worker lists the 8 lowest ids; the other 5 (camera 81 on 12 Oct) are queued."""
+    """13 enabled, cap 8: the worker lists the 8 lowest ids; the other 5 (incl. 81) are queued."""
     enabled = [11, 12, 13, 14, 15, 16, 17, 18, 81, 82, 83, 84, 85]
     view = anpr_live_view([[_entry(i) for i in sorted(enabled)[:8]]])
     got = {i: anpr_status(_cam(i), view) for i in enabled}
@@ -95,8 +129,8 @@ def test_status_unknown_without_a_view() -> None:
 
 def test_every_status_is_declared() -> None:
     view = AnprLiveView(1, {1: "live", 2: "starting", 3: "reconnecting"})
-    seen = {anpr_status(_cam(1), view), anpr_status(_cam(2), view), anpr_status(_cam(3), view), anpr_status(_cam(4), view),
-            anpr_status(_cam(5), AnprLiveView()), anpr_status(_cam(6, enabled=False), view)}
+    seen = {anpr_status(_cam(i), view) for i in (1, 2, 3, 4)}
+    seen |= {anpr_status(_cam(5), AnprLiveView()), anpr_status(_cam(6, enabled=False), view)}
     assert seen == set(serializers.ANPR_STATUSES)
 
 
@@ -109,7 +143,7 @@ def test_camera_full_carries_anpr_status_next_to_anpr_enabled() -> None:
     assert serializers.camera_full(_cam(4))["anpr_status"] is None  # caller loaded no view
 
 
-# ---- staleness (one rule for /health/summary and the camera status) -----------------------------------------------
+# ---- staleness (the /health/summary rule, reused for the camera status) ------------------
 def test_heartbeat_stale_after_three_missed_heartbeats() -> None:
     limit = timedelta(seconds=3 * settings.HEARTBEAT_S)
     assert heartbeat_stale(NOW - limit, NOW) is False
@@ -127,7 +161,7 @@ class _Result:
 
 
 class _FakeDb:
-    """Stands in for AsyncSession: returns the given (cameras, last_heartbeat_at) rows and records the statement."""
+    """Stands in for AsyncSession: returns (cameras, last_heartbeat_at) rows, records the SQL."""
 
     def __init__(self, rows: list[tuple[Any, ...]]) -> None:
         self.rows = rows
@@ -138,17 +172,18 @@ class _FakeDb:
         return _Result(self.rows)
 
 
-def test_live_anpr_view_reads_once_and_drops_stale_workers(monkeypatch) -> None:
-    from app.services import health_poller
+def _load(db: _FakeDb) -> AnprLiveView:
+    return asyncio.run(cameras_api.live_anpr_view(db))  # type: ignore[arg-type]
 
-    monkeypatch.setattr(health_poller, "utcnow", lambda: NOW)
+
+def test_live_anpr_view_reads_once_and_drops_stale_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cameras_api, "utcnow", lambda: NOW)
     fresh = NOW - timedelta(seconds=5)
     stale = NOW - timedelta(seconds=3 * settings.HEARTBEAT_S + 1)
     db = _FakeDb([([_entry(91), _entry(92, "reconnecting")], fresh), ([_entry(93)], stale)])
-    view = asyncio.run(live_anpr_view(db))  # type: ignore[arg-type]
+    view = _load(db)
     assert len(db.statements) == 1
-    sql = str(db.statements[0])
-    assert "anpr_workers.mode" in sql  # only live-mode workers
+    assert "anpr_workers.mode" in str(db.statements[0])  # only live-mode workers
     assert view.workers == 1 and view.states == {91: "live", 92: "reconnecting"}
     assert anpr_status(_cam(93), view) == "queued"  # listed only by a stale worker
-    assert anpr_status(_cam(93), asyncio.run(live_anpr_view(_FakeDb([([_entry(93)], stale)])))) == "no_worker"  # type: ignore[arg-type]
+    assert anpr_status(_cam(93), _load(_FakeDb([([_entry(93)], stale)]))) == "no_worker"

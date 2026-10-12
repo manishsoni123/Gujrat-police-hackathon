@@ -458,21 +458,13 @@ def _int_ids(cams: list[dict[str, Any]]) -> list[int]:
 def heartbeat_stale(last_heartbeat_at: datetime | None, now: datetime | None = None) -> bool:
     """CONTRACT §5.5: a worker is stale when its last heartbeat is older than 3 × `HEARTBEAT_S`.
 
-    The one rule behind `anpr_workers[].stale` (/health/summary, /dashboard/stats) and the camera `anpr_status`.
+    Used for `anpr_workers[].stale` (/health/summary, /dashboard/stats, below) and for the camera
+    `anpr_status` (api/cameras.live_anpr_view). /healthz still counts fresh workers with its own
+    copy of the same cut-off in SQL.
     """
     if last_heartbeat_at is None:
         return True
     return ((now or utcnow()) - last_heartbeat_at) > timedelta(seconds=3 * settings.HEARTBEAT_S)
-
-
-async def live_anpr_view(db: AsyncSession) -> serializers.AnprLiveView:
-    """Input of the camera `anpr_status`: one read of `anpr_workers` per request (list or detail), never per camera.
-
-    Only live-mode workers count (a pre-index worker never raises live alerts); stale rows are dropped.
-    """
-    rows = (await db.execute(select(AnprWorker.cameras, AnprWorker.last_heartbeat_at).where(AnprWorker.mode == "live"))).all()
-    now = utcnow()
-    return serializers.anpr_live_view(cams for cams, last_hb in rows if not heartbeat_stale(last_hb, now))
 
 
 async def worker_status(db: AsyncSession, scope: Scope | None = None) -> list[dict[str, Any]]:

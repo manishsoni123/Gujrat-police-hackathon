@@ -12,7 +12,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTool
 import { PageHeader } from '@/components/PageHeader';
 import { StreamPlayer, type ActiveMode } from '@/components/StreamPlayer';
 import { camerasApi, detectionsApi, eventsApi, objectsApi } from '@/api';
-import type { Detection, EventItem } from '@/api/types';
+import type { Camera, Detection, EventItem } from '@/api/types';
 import { useReadsSocket } from '@/ws/useReadsSocket';
 import { useHealthSocket } from '@/ws/useHealthSocket';
 import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolTag, AmcTag, LocationConfidenceTag, WatchlistHitTag, AnprTag, codecLabel } from '@/components/Tags';
@@ -140,7 +140,12 @@ export function CameraDetailPage() {
   const canWrite = usePermission('cameras.write');
   const canEvent = usePermission('events.write');
   // An ANPR camera is re-read every 30 s so the ANPR pill follows the worker (reconnecting, queued, worker gone).
-  const cam = useQuery({ queryKey: ['cameras', 'detail', cameraId], queryFn: () => camerasApi.get(cameraId), enabled: Number.isFinite(cameraId), refetchInterval: (q) => (q.state.data?.anpr_enabled ? 30_000 : false) });
+  const cam = useQuery({
+    queryKey: ['cameras', 'detail', cameraId],
+    queryFn: () => camerasApi.get(cameraId),
+    enabled: Number.isFinite(cameraId),
+    refetchInterval: (q) => (q.state.data?.anpr_enabled ? 30_000 : false),
+  });
   const seedReads = useQuery({ queryKey: ['detections', 'camera', cameraId, 'seed'], queryFn: () => detectionsApi.list({ camera_id: cameraId, page_size: 30 }), enabled: Number.isFinite(cameraId) });
   const events = useQuery({ queryKey: ['events', 'camera', cameraId], queryFn: () => eventsApi.list({ camera_id: cameraId, page_size: 50 }), enabled: Number.isFinite(cameraId) });
   const ws = useReadsSocket(Number.isFinite(cameraId) ? cameraId : null);
@@ -148,6 +153,10 @@ export function CameraDetailPage() {
   const [mode, setMode] = useState<ActiveMode | null>(null);
   const [eventOpen, setEventOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  // The edit modal works on the camera as it was when the modal opened: CameraForm re-seeds every field
+  // whenever its `camera` prop changes, so handing it the live query data would wipe unsaved edits on
+  // every 30 s ANPR re-read above (last_seen_at, reads_24h, uptime change each time) or health refetch.
+  const [editCamera, setEditCamera] = useState<Camera | null>(null);
   const [tab, setTab] = useState('reads');
   const [detections, setDetections] = useState(readDetectionsPref);
   const toggleDetections = (on: boolean) => {
@@ -213,7 +222,14 @@ export function CameraDetailPage() {
               </Button>
             ) : null}
             {canWrite ? (
-              <Button type="primary" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
+              <Button
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={() => {
+                  setEditCamera(c);
+                  setEditOpen(true);
+                }}
+              >
                 Edit
               </Button>
             ) : null}
@@ -318,7 +334,7 @@ export function CameraDetailPage() {
         </Card>
       </div>
       <EventForm open={eventOpen} onClose={() => setEventOpen(false)} cameraId={c.id} />
-      <CameraForm open={editOpen} onClose={() => setEditOpen(false)} camera={c} />
+      <CameraForm open={editOpen} onClose={() => setEditOpen(false)} camera={editCamera ?? c} />
     </div>
   );
 }
