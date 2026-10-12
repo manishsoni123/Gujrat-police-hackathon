@@ -35,5 +35,7 @@ export function boundsOf(points: Array<[number, number]>): [[number, number], [n
   ];
 }
 
-export const OSM_TILES = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+// Same-origin proxy to tile.openstreetmap.org (deploy/Caddyfile /tiles/*) so a browser-side web filter cannot
+// blank the map; `npm run dev` without the stack proxies /tiles the same way (vite.config.ts).
+export const OSM_TILES = '/tiles/{z}/{x}/{y}.png';
 export const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';

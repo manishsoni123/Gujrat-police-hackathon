@@ -144,6 +144,9 @@ class Settings(BaseSettings):
     GAP_GRID_M: int = 500
     AGEING_YEARS: int = 5
     GAP_CACHE_SECONDS: int = 300
+    # Camera form address <-> lat/lon lookup (services/geocoder.py); empty URL = disabled (map click only)
+    GEOCODER_URL: str = "https://nominatim.openstreetmap.org"
+    GEOCODER_USER_AGENT: str = "SentinelGujarat/1.0 (Gujarat Police Innovation Challenge 2026; Dynatech Consultancy)"
     RETENTION_DAYS_FRAMES: int = 7
     RETENTION_DAYS_READS: int = 30
     RETENTION_DAYS_CLIPS: int = 90

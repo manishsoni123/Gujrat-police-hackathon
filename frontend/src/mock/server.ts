@@ -238,6 +238,9 @@ on('GET', '/cameras/(\\d+)/health', (m, url) => {
 on('GET', '/geo/cameras', (_m, url) => ({ body: D.geoCameras({ department_id: num(url, 'department_id'), district: str(url, 'district'), status: str(url, 'status'), type: str(url, 'type') }) }));
 on('GET', '/geo/districts', () => ({ body: D.geoDistricts() }));
 on('GET', '/geo/pois', (_m, url) => ({ body: D.geoPois(str(url, 'district')) }));
+const MOCK_PLACE = { display_name: 'Sachivalaya, Sector 10, Gandhinagar, Gujarat, 382010, India', lat: 23.218947, lon: 72.656654, district: 'Gandhinagar', ward: 'Sector 10', road: 'Ch Road', city: 'Gandhinagar', postcode: '382010' };
+on('GET', '/geo/geocode', (_m, url) => ({ body: { items: (str(url, 'q') ?? '').length >= 3 ? [MOCK_PLACE] : [] } }));
+on('GET', '/geo/reverse', (_m, url) => ({ body: { ...MOCK_PLACE, lat: num(url, 'lat') ?? MOCK_PLACE.lat, lon: num(url, 'lon') ?? MOCK_PLACE.lon, address_available: true } }));
 on('GET', '/geo/coverage', (_m, url) => ({ body: D.geoCoverage(num(url, 'radius') ?? 150) }));
 on('GET', '/streams/(\\d+)', (m) => {
   const c = D.cameraById.get(Number(m[1]));

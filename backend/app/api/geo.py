@@ -11,10 +11,11 @@ from sqlalchemy import func, select, text
 
 from app.api.deps import CurrentUser, DbDep, require_permission, user_scope
 from app.core.config import settings
+from app.core.errors import ApiError
 from app.core.tz import iso_z
 from app.db.models import Camera, District, Poi
 from app.schemas.common import csv_list
-from app.services import gap_analysis, lookups
+from app.services import gap_analysis, geocoder, lookups
 from app.services import settings_service as cfg
 from app.services.scope import camera_conditions
 
@@ -116,3 +117,38 @@ async def geo_coverage(user: CurrentUser, db: DbDep, radius: int | None = Query(
     data = await gap_analysis.coverage_geojson(db, scope, r, district, include_offline)
     _coverage_cache[key] = (now, data)
     return data
+
+
+@router.get("/geo/geocode", dependencies=[Depends(require_permission("cameras.write"))])
+async def geo_geocode(db: DbDep, q: str = Query(..., min_length=3, max_length=200)):
+    """Address -> up to 5 candidate places for the camera form; 503 `geocoder_unavailable` when offline."""
+    places = await geocoder.search(q.strip())
+    items = []
+    for p in places:
+        district = await geocoder.district_at(db, p["lat"], p["lon"])
+        items.append({**p, "district": district or p["district"]})
+    return {"items": items}
+
+
+@router.get("/geo/reverse", dependencies=[Depends(require_permission("cameras.write"))])
+async def geo_reverse(db: DbDep, lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)):
+    """Coordinates -> address, district, ward. The district comes from the PostGIS polygons even offline."""
+    district = await geocoder.district_at(db, lat, lon)
+    try:
+        place = await geocoder.reverse(lat, lon) or {}
+        available = True
+    except ApiError as e:
+        if e.status != 503:
+            raise
+        place, available = {}, False
+    return {
+        "display_name": place.get("display_name"),
+        "lat": round(lat, 6),
+        "lon": round(lon, 6),
+        "district": district or place.get("district"),
+        "ward": place.get("ward"),
+        "road": place.get("road"),
+        "city": place.get("city"),
+        "postcode": place.get("postcode"),
+        "address_available": available,
+    }

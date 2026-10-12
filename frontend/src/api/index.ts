@@ -31,7 +31,9 @@ import type {
   GeoCoverageProps,
   GeoDistrictProps,
   GeoFeatureCollection,
+  GeoPlace,
   GeoPoiProps,
+  GeoReverse,
   HealthSummary,
   Healthz,
   ListParams,
@@ -114,6 +116,8 @@ export const geoApi = {
   pois: (params?: Query) => api<GeoFeatureCollection<GeoPoiProps>>('/geo/pois', { query: params }),
   coverage: (radius?: number, district?: string) =>
     api<GeoFeatureCollection<GeoCoverageProps>>('/geo/coverage', { query: { radius, district } }),
+  geocode: (q: string) => api<{ items: GeoPlace[] }>('/geo/geocode', { query: { q } }),
+  reverse: (lat: number, lon: number) => api<GeoReverse>('/geo/reverse', { query: { lat, lon } }),
 };
 
 export const streamsApi = {

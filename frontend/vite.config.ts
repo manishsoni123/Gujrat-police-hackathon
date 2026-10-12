@@ -27,6 +27,13 @@ export default defineConfig({
       '/playback': { target, changeOrigin: true },
       '/media': { target, changeOrigin: true },
       '/healthz': { target, changeOrigin: true },
+      // map tiles straight from OSM so `dev:mock` works without Caddy (production: deploy/Caddyfile)
+      '/tiles': {
+        target: 'https://tile.openstreetmap.org',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/tiles/, ''),
+        headers: { 'User-Agent': 'SentinelGujarat-dev/1.0 (Gujarat Police Innovation Challenge 2026; Dynatech Consultancy)' },
+      },
     },
   },
   build: {

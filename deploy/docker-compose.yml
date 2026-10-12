@@ -245,6 +245,9 @@ services:
       GAP_GRID_M: ${GAP_GRID_M:-500}
       AGEING_YEARS: ${AGEING_YEARS:-5}
       GAP_CACHE_SECONDS: ${GAP_CACHE_SECONDS:-300}
+      # no colon: an explicitly empty GEOCODER_URL disables the lookup
+      GEOCODER_URL: ${GEOCODER_URL-https://nominatim.openstreetmap.org}
+      GEOCODER_USER_AGENT: "${GEOCODER_USER_AGENT:-SentinelGujarat/1.0 (Gujarat Police Innovation Challenge 2026; Dynatech Consultancy)}"
       RETENTION_DAYS_FRAMES: ${RETENTION_DAYS_FRAMES:-7}
       RETENTION_DAYS_READS: ${RETENTION_DAYS_READS:-30}
       RETENTION_DAYS_CLIPS: ${RETENTION_DAYS_CLIPS:-90}

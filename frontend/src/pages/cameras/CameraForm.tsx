@@ -1,12 +1,12 @@
-/** Add / edit camera modal with the full CONTRACT schema and a map click to set lat/lon. */
-import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Col, DatePicker, Form, Input, InputNumber, Modal, Row, Select, Switch, Tabs, Typography, message } from 'antd';
-import { Marker, useMapEvents } from '@/components/leaflet';
+/** Add / edit camera modal with the full CONTRACT schema; address search and map click/drag set lat/lon both ways. */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AutoComplete, Button, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Select, Switch, Tabs, Typography, message } from 'antd';
+import { Marker, useMap, useMapEvents } from '@/components/leaflet';
 import L from 'leaflet';
-import { camerasApi } from '@/api';
+import { camerasApi, geoApi } from '@/api';
 import { ApiError } from '@/api/client';
-import type { Camera, CameraImportRow } from '@/api/types';
+import type { Camera, CameraImportRow, GeoPlace } from '@/api/types';
 import { useDepartments } from '@/hooks/useCamerasOptions';
 import { BaseMap } from '@/components/MapView';
 import { GANDHINAGAR_CENTER } from '@/utils/geo';
@@ -16,10 +16,35 @@ import { maskUrlCredentials } from '@/utils/url';
 
 const pinIcon = L.divIcon({ className: '', html: '<div class="sg-route-marker" style="width:18px;height:18px;font-size:10px">●</div>', iconSize: [18, 18], iconAnchor: [9, 9] });
 
-function ClickPicker({ value, onChange }: { value: [number, number] | null; onChange: (p: [number, number]) => void }) {
-  useMapEvents({ click: (e) => onChange([Number(e.latlng.lat.toFixed(6)), Number(e.latlng.lng.toFixed(6))]) });
-  return value ? <Marker position={value} icon={pinIcon} /> : null;
+type LatLon = [number, number];
+const round6 = (n: number) => Number(n.toFixed(6));
+
+function ClickPicker({ value, onChange }: { value: LatLon | null; onChange: (p: LatLon) => void }) {
+  useMapEvents({ click: (e) => onChange([round6(e.latlng.lat), round6(e.latlng.lng)]) });
+  const handlers = useMemo<L.LeafletEventHandlerFnMap>(
+    () => ({ dragend: (e) => { const ll = (e.target as L.Marker).getLatLng(); onChange([round6(ll.lat), round6(ll.lng)]); } }),
+    [onChange],
+  );
+  return value ? <Marker position={value} icon={pinIcon} draggable eventHandlers={handlers} /> : null;
 }
+
+/** Moves the map when the position comes from an address search or typed coordinates (MapContainer reads `center` once). */
+function FlyTo({ target }: { target: { pos: LatLon } | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (target) map.flyTo(target.pos, Math.max(map.getZoom(), 16), { duration: 0.6 });
+  }, [map, target]);
+  return null;
+}
+
+type GeoStatus = { kind: 'idle' | 'loading' | 'found' | 'none' | 'unavailable'; text?: string };
+const GEO_STATUS_TEXT: Record<GeoStatus['kind'], string> = {
+  idle: '',
+  loading: 'Looking up address…',
+  found: 'Location found from OpenStreetMap; it is approximate, so check the pin and drag it if needed.',
+  none: 'No address found here; type it in.',
+  unavailable: 'Address lookup is unavailable right now; click the map to set the location.',
+};
 
 interface CameraFormProps {
   open: boolean;
@@ -47,12 +72,174 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
   const { departments } = useDepartments();
   const [form] = Form.useForm<FormValues>();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [pos, setPos] = useState<[number, number] | null>(camera?.lat != null && camera?.lon != null ? [camera.lat, camera.lon] : null);
+  const [pos, setPosState] = useState<LatLon | null>(camera?.lat != null && camera?.lon != null ? [camera.lat, camera.lon] : null);
+  const [latIn, setLatIn] = useState<number | null>(camera?.lat ?? null);
+  const [lonIn, setLonIn] = useState<number | null>(camera?.lon ?? null);
+  const [fly, setFly] = useState<{ pos: LatLon } | null>(null);
+  const [geoStatus, setGeoStatus] = useState<GeoStatus>({ kind: 'idle' });
+  const [suggestedAddress, setSuggestedAddress] = useState<string | null>(null);
+  const [addrText, setAddrText] = useState('');
+  const [addrQuery, setAddrQuery] = useState('');
+  const pickFirst = useRef(false);
+  const autoAddress = useRef<string | null>(null);
+  const reverseSeq = useRef(0);
+  const reverseTimer = useRef<number | undefined>(undefined);
   const editing = Boolean(camera);
+
+  const setPos = useCallback((p: LatLon | null) => {
+    setPosState(p);
+    setLatIn(p ? p[0] : null);
+    setLonIn(p ? p[1] : null);
+  }, []);
+
+  /** Fill district / ward only where the user left them empty. */
+  const fillEmpty = useCallback(
+    (place: Pick<GeoPlace, 'district' | 'ward'>) => {
+      const cur = form.getFieldsValue(['district', 'ward']) as Partial<FormValues>;
+      const patch: Partial<FormValues> = {};
+      if (!cur.district && place.district) patch.district = place.district;
+      if (!cur.ward && place.ward) patch.ward = place.ward;
+      if (Object.keys(patch).length) form.setFieldsValue(patch as FormValues);
+    },
+    [form],
+  );
+
+  const reverseLookup = useCallback(
+    async (p: LatLon) => {
+      const seq = ++reverseSeq.current;
+      setGeoStatus({ kind: 'loading' });
+      setSuggestedAddress(null);
+      try {
+        const r = await qc.fetchQuery({
+          queryKey: ['geo', 'reverse', p[0].toFixed(5), p[1].toFixed(5)],
+          queryFn: () => geoApi.reverse(p[0], p[1]),
+          staleTime: Infinity,
+          retry: false,
+        });
+        if (seq !== reverseSeq.current) return;
+        fillEmpty(r);
+        if (!r.address_available) return setGeoStatus({ kind: 'unavailable' });
+        if (!r.display_name) return setGeoStatus({ kind: 'none' });
+        const current = (form.getFieldValue('address') as string | undefined)?.trim();
+        if (!current || current === autoAddress.current) {
+          form.setFieldsValue({ address: r.display_name } as FormValues);
+          autoAddress.current = r.display_name;
+        } else if (current !== r.display_name) {
+          setSuggestedAddress(r.display_name);
+        }
+        setGeoStatus({ kind: 'found' });
+      } catch {
+        if (seq === reverseSeq.current) setGeoStatus({ kind: 'unavailable' });
+      }
+    },
+    [qc, form, fillEmpty],
+  );
+
+  /** Map click or marker drag: the map is already there, so no fly-to. Only the last pin of a burst of
+   *  clicks is looked up (the API spaces lookups 1 s apart, so every click would otherwise queue). */
+  const onMapPick = useCallback(
+    (p: LatLon) => {
+      setPos(p);
+      reverseSeq.current++;
+      setGeoStatus({ kind: 'loading' });
+      window.clearTimeout(reverseTimer.current);
+      reverseTimer.current = window.setTimeout(() => void reverseLookup(p), 500);
+    },
+    [setPos, reverseLookup],
+  );
+
+  /** Typed coordinates are applied on blur, and only when both are valid; one never invents the other. */
+  const commitTypedCoords = () => {
+    if (latIn == null && lonIn == null) {
+      if (pos) setPosState(null);
+      return;
+    }
+    if (latIn == null || lonIn == null || (pos && pos[0] === latIn && pos[1] === lonIn)) return;
+    const p: LatLon = [latIn, lonIn];
+    setPosState(p);
+    setFly({ pos: p });
+    void reverseLookup(p);
+  };
+
+  const applySearchResult = useCallback(
+    (place: GeoPlace) => {
+      const p: LatLon = [place.lat, place.lon];
+      reverseSeq.current++; // drop any reverse lookup still in flight
+      setPos(p);
+      setFly({ pos: p });
+      if (place.display_name) {
+        form.setFieldsValue({ address: place.display_name } as FormValues);
+        autoAddress.current = place.display_name;
+        setAddrText(place.display_name);
+      }
+      fillEmpty(place);
+      setSuggestedAddress(null);
+      setGeoStatus({ kind: 'found' });
+    },
+    [form, fillEmpty, setPos],
+  );
+
+  useEffect(() => () => window.clearTimeout(reverseTimer.current), []);
+
+  // Debounced address search (600 ms); repeat queries come from the query cache.
+  useEffect(() => {
+    const q = addrText.trim();
+    const t = window.setTimeout(() => setAddrQuery(q.length >= 3 ? q : ''), 600);
+    return () => window.clearTimeout(t);
+  }, [addrText]);
+
+  const geocode = useQuery({
+    queryKey: ['geo', 'geocode', addrQuery.toLowerCase()],
+    queryFn: () => geoApi.geocode(addrQuery),
+    enabled: open && addrQuery.length >= 3 && addrQuery !== autoAddress.current,
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (geocode.isError) {
+      pickFirst.current = false;
+      setGeoStatus({ kind: 'unavailable' });
+    } else if (geocode.data && pickFirst.current) {
+      pickFirst.current = false;
+      if (geocode.data.items[0]) applySearchResult(geocode.data.items[0]);
+      else setGeoStatus({ kind: 'none', text: 'No place found for that address; try a nearby landmark or click the map.' });
+    }
+  }, [geocode.isError, geocode.data, applySearchResult]);
+
+  const addressOptions = useMemo(
+    () =>
+      (geocode.data?.items ?? [])
+        .filter((p) => p.display_name)
+        .map((p, i) => ({ key: String(i), value: p.display_name as string, label: <span style={{ whiteSpace: 'normal' }}>{p.display_name}</span>, place: p })),
+    [geocode.data],
+  );
+
+  const findAddress = () => {
+    const q = addrText.trim();
+    if (q.length < 3) return;
+    pickFirst.current = true;
+    setGeoStatus({ kind: 'loading', text: 'Searching for the address…' });
+    if (q === addrQuery && geocode.data) {
+      pickFirst.current = false;
+      if (geocode.data.items[0]) applySearchResult(geocode.data.items[0]);
+      else setGeoStatus({ kind: 'none', text: 'No place found for that address; try a nearby landmark or click the map.' });
+    } else {
+      autoAddress.current = null;
+      setAddrQuery(q);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
     setFieldErrors({});
+    setGeoStatus({ kind: 'idle' });
+    setSuggestedAddress(null);
+    setFly(null);
+    setAddrQuery('');
+    autoAddress.current = null;
+    pickFirst.current = false;
+    setAddrText(camera?.address ?? '');
     if (camera) {
       form.setFieldsValue({
         ...camera,
@@ -67,7 +254,7 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
       form.setFieldsValue({ type: 'ip', ownership: 'govt_dept', codec: 'H264', maintenance_status: 'ok', source: 'manual', anpr_enabled: false, record_enabled: false } as FormValues);
       setPos(null);
     }
-  }, [open, camera, form]);
+  }, [open, camera, form, setPos]);
 
   const deptOptions = useMemo(() => departments.map((d) => ({ value: d.code, label: `${d.name} (${d.code})` })), [departments]);
 
@@ -75,8 +262,8 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
     mutationFn: async (v: FormValues) => {
       const body: CameraImportRow = {
         ...v,
-        lat: pos ? pos[0] : null,
-        lon: pos ? pos[1] : null,
+        lat: latIn ?? null,
+        lon: lonIn ?? null,
         install_date: v.install_date ? v.install_date.format('YYYY-MM-DD') : null,
         amc_expiry: v.amc_expiry ? v.amc_expiry.format('YYYY-MM-DD') : null,
       };
@@ -119,6 +306,11 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
 
   const submit = async () => {
     const v = await form.validateFields();
+    if ((latIn == null) !== (lonIn == null)) {
+      const msg = 'Enter both latitude and longitude, or clear both';
+      setFieldErrors({ [latIn == null ? 'lat' : 'lon']: msg });
+      return;
+    }
     setFieldErrors({});
     save.mutate(v);
   };
@@ -168,8 +360,42 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
                         ) : null}
                       </Col>
                     </Row>
-                    <Form.Item name="address" label="Address" {...fe('address')}>
-                      <Input />
+                    <Form.Item
+                      name="address"
+                      label="Address"
+                      {...fe('address')}
+                      extra={
+                        suggestedAddress ? (
+                          <span>
+                            Address at the pin: {suggestedAddress}{' '}
+                            <Button
+                              type="link"
+                              size="small"
+                              style={{ padding: 0, height: 'auto' }}
+                              onClick={() => {
+                                form.setFieldsValue({ address: suggestedAddress } as FormValues);
+                                autoAddress.current = suggestedAddress;
+                                setAddrText(suggestedAddress);
+                                setSuggestedAddress(null);
+                              }}
+                            >
+                              Use this
+                            </Button>
+                          </span>
+                        ) : (
+                          'Type an address and pick a suggestion, or press Find, to place the pin'
+                        )
+                      }
+                    >
+                      <AutoComplete
+                        options={addressOptions}
+                        onSearch={setAddrText}
+                        onSelect={(_v, option) => applySearchResult(option.place)}
+                        popupMatchSelectWidth={false}
+                        dropdownStyle={{ maxWidth: 520 }}
+                      >
+                        <Input.Search placeholder="e.g. Sachivalaya, Sector 10, Gandhinagar" enterButton="Find" loading={geocode.isFetching} onSearch={findAddress} />
+                      </AutoComplete>
                     </Form.Item>
                     <Row gutter={8}>
                       <Col span={8}>
@@ -190,21 +416,27 @@ export function CameraForm({ open, onClose, camera, onSaved }: CameraFormProps) 
                     </Row>
                   </Col>
                   <Col span={12}>
-                    <Typography.Text strong>Location - click the map to set coordinates</Typography.Text>
+                    <Typography.Text strong>Location - click the map or drag the pin to set coordinates</Typography.Text>
                     <div style={{ marginTop: 8 }}>
                       <BaseMap height={260} center={center} zoom={pos ? 14 : 11}>
-                        <ClickPicker value={pos} onChange={setPos} />
+                        <ClickPicker value={pos} onChange={onMapPick} />
+                        <FlyTo target={fly} />
                       </BaseMap>
                     </div>
+                    {geoStatus.kind !== 'idle' ? (
+                      <Typography.Text type={geoStatus.kind === 'unavailable' || geoStatus.kind === 'none' ? 'warning' : 'secondary'} style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+                        {geoStatus.text ?? GEO_STATUS_TEXT[geoStatus.kind]}
+                      </Typography.Text>
+                    ) : null}
                     <Row gutter={8} style={{ marginTop: 8 }}>
                       <Col span={12}>
                         <Form.Item label="Latitude" {...fe('lat')}>
-                          <InputNumber value={pos?.[0]} min={-90} max={90} step={0.0001} style={{ width: '100%' }} onChange={(v) => setPos([Number(v ?? 0), pos?.[1] ?? 72.6])} />
+                          <InputNumber value={latIn} min={-90} max={90} step={0.0001} precision={6} style={{ width: '100%' }} placeholder="23.2189" onChange={(v) => setLatIn(v == null ? null : Number(v))} onBlur={commitTypedCoords} onPressEnter={commitTypedCoords} />
                         </Form.Item>
                       </Col>
                       <Col span={12}>
                         <Form.Item label="Longitude" {...fe('lon')}>
-                          <InputNumber value={pos?.[1]} min={-180} max={180} step={0.0001} style={{ width: '100%' }} onChange={(v) => setPos([pos?.[0] ?? 23.2, Number(v ?? 0)])} />
+                          <InputNumber value={lonIn} min={-180} max={180} step={0.0001} precision={6} style={{ width: '100%' }} placeholder="72.6567" onChange={(v) => setLonIn(v == null ? null : Number(v))} onBlur={commitTypedCoords} onPressEnter={commitTypedCoords} />
                         </Form.Item>
                       </Col>
                     </Row>

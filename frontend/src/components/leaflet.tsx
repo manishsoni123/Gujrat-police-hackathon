@@ -100,17 +100,18 @@ interface MarkerProps {
   position: [number, number];
   icon?: L.Icon | L.DivIcon;
   title?: string;
+  draggable?: boolean;
   eventHandlers?: L.LeafletEventHandlerFnMap;
   children?: ReactNode;
 }
 
-export function Marker({ position, icon, title, eventHandlers, children }: MarkerProps) {
+export function Marker({ position, icon, title, draggable = false, eventHandlers, children }: MarkerProps) {
   const map = useMap();
   const [marker, setMarker] = useState<L.Marker | null>(null);
   const [lat, lng] = position;
 
   useEffect(() => {
-    const m = L.marker([lat, lng], { icon, title }).addTo(map);
+    const m = L.marker([lat, lng], { icon, title, draggable }).addTo(map);
     setMarker(m);
     return () => {
       setMarker(null);

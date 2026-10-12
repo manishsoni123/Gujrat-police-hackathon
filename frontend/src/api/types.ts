@@ -390,6 +390,21 @@ export interface GeoPoiProps {
   district: string;
   nearest_camera_m: number | null;
 }
+/** One place from GET /geo/geocode or /geo/reverse (OpenStreetMap Nominatim behind the API). */
+export interface GeoPlace {
+  display_name: string | null;
+  lat: number;
+  lon: number;
+  district: string | null;
+  ward: string | null;
+  road: string | null;
+  city: string | null;
+  postcode: string | null;
+}
+export interface GeoReverse extends GeoPlace {
+  /** false when the address service was unreachable; district still comes from the district polygons */
+  address_available: boolean;
+}
 export interface GeoCoverageProps {
   district: string;
   radius_m: number;

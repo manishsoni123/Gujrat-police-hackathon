@@ -58,6 +58,17 @@ def _v_url(v: Any) -> str:
     return check_outbound_url(s).rstrip("/")  # SSRF guard (core/urlguard.py)
 
 
+def _v_url_or_empty(v: Any) -> str:
+    return _v_url(v) if str(v or "").strip() else ""
+
+
+def _v_user_agent(v: Any) -> str:
+    s = str(v or "").strip()
+    if len(s) < 8:
+        raise ValueError("must identify the application (Nominatim usage policy)")
+    return s
+
+
 def _v_enum(*allowed: str) -> Callable[[Any], str]:
     def f(v: Any) -> str:
         s = str(v or "").strip().lower()
@@ -181,6 +192,8 @@ REGISTRY: dict[str, SettingDef] = {
         SettingDef("gap.poi_radius_m", lambda: env.GAP_POI_RADIUS_M, _v_num(10, 10000, True), public=True),
         SettingDef("gap.grid_m", lambda: env.GAP_GRID_M, _v_num(100, 5000, True), public=True),
         SettingDef("gap.ageing_years", lambda: env.AGEING_YEARS, _v_num(1, 50, True), public=True),
+        SettingDef("geocoder.url", lambda: env.GEOCODER_URL, _v_url_or_empty),
+        SettingDef("geocoder.user_agent", lambda: env.GEOCODER_USER_AGENT, _v_user_agent),
         SettingDef("alerts.suppression_s", lambda: env.ALERT_SUPPRESSION_SECONDS, _v_num(0, 3600, True)),
         SettingDef("alerts.re_alert_minutes", lambda: env.ALERT_RE_ALERT_MINUTES, _v_num(0, 1440, True)),
         SettingDef("alerts.fuzzy_min_conf", lambda: env.FUZZY_ALERT_MIN_CONF, _v_num(0, 1)),

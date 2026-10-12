@@ -161,6 +161,26 @@
 		}
 	}
 
+	# ---- OpenStreetMap tiles through our own origin: networks whose web filter
+	# blocks tile.openstreetmap.org in the browser (seen on the office Sophos)
+	# still get a map, because the container's egress is not filtered. Only
+	# /tiles/{z}/{x}/{y}.png is forwarded (no open proxy); no cookies or tokens
+	# go upstream; OSM's own Cache-Control lets the browser cache tiles.
+	handle_path /tiles/* {
+		@notTile not path_regexp ^/\d{1,2}/\d{1,7}/\d{1,7}\.png$
+		respond @notTile 404
+		reverse_proxy https://tile.openstreetmap.org {
+			header_up Host tile.openstreetmap.org
+			header_up User-Agent "SentinelGujarat/1.0 (Gujarat Police Innovation Challenge 2026; Dynatech Consultancy)"
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+			transport http {
+				dial_timeout 5s
+			}
+		}
+	}
+
 	# ---- SPA (React build in /srv) with history fallback
 	handle {
 		root * /srv
