@@ -1,17 +1,28 @@
-"""Organiser-sandbox import (`catalogue.source = sentinel_portal`): catalogue → probe → upsert → relay → summary.
+"""Organiser-sandbox import (`catalogue.source = sentinel_portal`).
 
-Shared by `POST /cameras/import/sandbox` (JSON body) and `POST /cameras/import/sandbox/file` (multipart upload).
-Probes go directly to the sandbox (one short RTSP session per camera; the relay paths are created afterwards),
-`sandbox.probe_timeout_s` cap each, and follow the organiser etiquette (`probe_paced`): at most
-`sandbox.probe_parallel` (≤ 6) in flight, every dial through the process-wide `dial_gate` (one new upstream
-connection per 3 s, shared with the relay and the health poller), and no further dials once the sandbox has
-refused our credentials three times in a row. 30 cameras therefore take 87 s of dial spacing plus the
-last answer (4-38 s), ~90-125 s; longer only when answers average over 18 s (6 in flight × 3 s). A 401/403 leaves `live` unknown (null), never false, and every
-import releases rows that an earlier refusal left at `live=false` (`release_auth_refusals`).
-Relay-source policy (CONTRACT Amendments 2026-09-05): after the upsert
-`ensure_relay_policies` re-asserts, for every non-retired camera, a **persistent** relay source for the cameras
-we actually process (`anpr_enabled`, own gate) and on-demand with a 10-minute close-after for the rest — paced,
-and only where the running relay differs, so a re-import never re-dials the live cameras.
+catalogue → probe → upsert → relay → summary. Shared by `POST /cameras/import/sandbox` (JSON body)
+and `POST /cameras/import/sandbox/file` (multipart upload).
+
+Probes go directly to the sandbox (one short RTSP session per camera; the relay paths are created
+afterwards), `sandbox.probe_timeout_s` cap each, and follow the organiser etiquette
+(`probe_paced`): at most `sandbox.probe_parallel` (≤ 6) in flight, every dial through the
+process-wide `dial_gate` (one new upstream connection per 3 s, shared with the relay and the
+health poller), and no further dials once the sandbox has refused our credentials three times in
+a row. 30 cameras therefore take 87 s of dial spacing plus the last answer (4-38 s), ~90-125 s;
+longer only when answers average over 18 s (6 in flight × 3 s).
+
+A 401/403 leaves `live` unknown (null), never false. Right before the upsert every non-dry-run
+import releases rows that an earlier refusal left at `live=false` (`release_auth_refusals`), so
+this import's own answer applies on top of null: a timeout or an undialled camera stays unknown.
+A failed probe measured nothing about the stream, so `metadata.probe` keeps the last known codec,
+resolution, fps, profile and B-frames (`carry_stream_facts`); `needs_transcode` reads `b_frames`,
+and a B-frame camera must not lose its `_h264` browser path to a refused or slow re-import.
+
+Relay-source policy (CONTRACT Amendments 2026-09-05): after the upsert `ensure_relay_policies`
+re-asserts, for every non-retired camera, a **persistent** relay source for the cameras we
+actually process (`anpr_enabled`, own gate) and on-demand with a 10-minute close-after for the
+rest — paced, and only where the running relay differs, so a re-import never re-dials the live
+cameras.
 """
 
 from __future__ import annotations
@@ -33,18 +44,22 @@ from app.adapters.sentinel_portal import SentinelPortalAdapter
 from app.core.tz import iso_z, utcnow
 from app.db.models import Camera
 from app.services import settings_service as cfg
-from app.services.camera_importer import ImportOutcome, upsert_cameras
+from app.services.camera_importer import ImportOutcome, pick_existing, upsert_cameras
 from app.services.mediamtx_client import PERSISTENT, dial_gate, play_path, relay_policy
 from app.services.mediamtx_client import client as mtx
 from app.services.sentinel_catalogue import source_camera_row
 
 log = logging.getLogger("sentinel.import")
 
-# Consecutive credential refusals (RTSP 401/403) after which the import stops dialling: every camera of the
-# sandbox uses the same e-mail + access password, so the remaining ones would only add failed logins against a
-# server that refuses bursts.
+# Consecutive credential refusals (RTSP 401/403) after which the import stops dialling: every
+# camera of the sandbox uses the same e-mail + access password, so the remaining ones would only
+# add failed logins against a server that refuses bursts.
 AUTH_REFUSALS_BEFORE_STOP = 3
-_AUTH_REFUSAL_RE = re.compile(r"(Server returned 40[13]\b|\b401 Unauthorized|\b403 Forbidden)", re.I)
+_AUTH_REFUSAL_RE = re.compile(
+    r"(Server returned 40[13]\b|\b401 Unauthorized|\b403 Forbidden)", re.I
+)
+# What a successful probe measured about the stream (kept across failed probes).
+STREAM_FACTS = ("codec", "resolution", "fps", "profile", "b_frames")
 
 
 class _Gate(Protocol):
@@ -147,8 +162,9 @@ async def probe_paced(
             tasks.append(asyncio.create_task(dial(cam)))
         await asyncio.gather(*tasks)
     finally:
+        # a no-op for finished probes; stops the rest if the import itself is cancelled
         for t in tasks:
-            t.cancel()  # no-op for finished probes; stops the rest if the import itself is cancelled
+            t.cancel()
     return out
 
 
@@ -165,17 +181,19 @@ def unprobed_row(cam: SourceCamera, error: str | None) -> dict[str, Any]:
 def skipped_message(refusals: int) -> str:
     return (
         "not probed: the sandbox refused the stream credentials (RTSP 401/403) "
-        f"{refusals} times in a row; check Settings → Organiser stream relay (registered e-mail / "
-        "access password) and re-run the import later"
+        f"{refusals} times in a row; check Settings → Organiser stream relay "
+        "(registered e-mail / access password) and re-run the import later"
     )
 
 
 def import_row(cam: SourceCamera) -> dict[str, Any]:
     """Importer row for a catalogue camera. `source_camera_row` leaves out None values, so an
     update keeps whatever it does not carry: a timeout keeps the stored `live`, and so does a
-    camera that was not dialled. A credential refusal (`metadata.probe.kind` "auth") must instead
-    clear a stored `live=false`, or the health poller would never probe that camera again, so its
-    row carries an explicit `live: None` (the importer copies every key present in the row)."""
+    camera that was not dialled (a stored false left by an earlier refusal is already null by
+    then, see `release_auth_refusals`). A credential refusal (`metadata.probe.kind` "auth") must
+    clear a stored `live`, or a stored false would stop the health poller from ever probing the
+    camera again, so its row carries an explicit `live: None` (the importer copies every key
+    present in the row)."""
     row = source_camera_row(cam)
     probe = (cam.extra.get("metadata") or {}).get("probe") or {}
     if probe.get("kind") == "auth":
@@ -197,9 +215,11 @@ def held_by_auth_refusal(live: bool | None, meta: dict[str, Any] | None) -> bool
 
 async def release_auth_refusals(db: AsyncSession) -> list[str]:
     """Set `live` back to null (unknown, health-probed again) on every non-retired sandbox camera
-    that `held_by_auth_refusal`. Runs on every non-dry-run import, so rows that an earlier refusal
-    marked dead recover even when this import is refused again or does not dial them.
-    Returns their external ids."""
+    that `held_by_auth_refusal`. Runs on every non-dry-run import **before** the upsert: rows that
+    an earlier refusal marked dead recover even when this import is refused again, times out on
+    them or does not dial them (the upsert keeps the stored value for those, which is then null),
+    while an answer of this import (ok, 404, refused) still lands on top. Returns their
+    external ids."""
     stmt = select(Camera).where(
         Camera.source == "sandbox", Camera.live.is_(False), Camera.status != "retired"
     )
@@ -217,17 +237,81 @@ async def release_auth_refusals(db: AsyncSession) -> list[str]:
 
 def released_message(count: int) -> str:
     return (
-        f"{count} cameras marked live=false by an earlier credential refusal (RTSP 401/403) are "
-        "unknown again (live=null), so the health poller checks them"
+        f"{count} cameras marked live=false by an earlier credential refusal (RTSP 401/403) "
+        "were reset to unknown (live=null) before this import's results were applied; the "
+        "health poller checks the ones this import did not settle"
     )
 
 
+def carry_stream_facts(probe: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, Any]:
+    """`metadata.probe` for a camera whose probe failed: this probe's `at`, `ok`, `error`, `kind`
+    and `duration_ms`, plus the stream facts (`STREAM_FACTS`) of the last probe that measured them
+    and `stream_at`, the time it did. A refusal, timeout or network error measured nothing about
+    the stream, and `needs_transcode` reads `b_frames`: dropping it would take the `_h264` browser
+    path away from a B-frame H.264 camera. A successful probe, or no stored facts (never probed
+    OK), returns `probe` unchanged. Pure."""
+    if probe.get("ok") or not isinstance(stored, dict):
+        return probe
+    if stored.get("ok"):
+        measured_at = stored.get("at")
+    elif stored.get("stream_at"):
+        measured_at = stored["stream_at"]  # carried by an earlier failed probe
+    else:
+        return probe
+    facts = {k: stored.get(k) for k in STREAM_FACTS}
+    if all(v is None for v in facts.values()):
+        return probe
+    return {**probe, **facts, "stream_at": measured_at}
+
+
+async def stored_probes(db: AsyncSession, external_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """`metadata.probe` of the rows the upsert will update for these external ids, matched like
+    the importer's `match_any_source` (`pick_existing`). Read only."""
+    wanted = sorted({e for e in external_ids if e})
+    if not wanted:
+        return {}
+    stmt = select(Camera).where(Camera.external_id.in_(wanted))
+    rows = (await db.execute(stmt)).scalars().all()
+    out: dict[str, dict[str, Any]] = {}
+    for ext, cam in pick_existing(list(rows), "sandbox").items():
+        probe = (cam.meta or {}).get("probe") if isinstance(cam.meta, dict) else None
+        if isinstance(probe, dict):
+            out[ext] = probe
+    return out
+
+
+async def keep_stream_facts(db: AsyncSession, cams: Sequence[SourceCamera]) -> int:
+    """Apply `carry_stream_facts` to every camera whose import probe failed, against its stored
+    row. No database read when every probe succeeded or nothing was probed. Returns how many
+    probes got stored facts."""
+    failed: dict[str, dict[str, Any]] = {}
+    for c in cams:
+        probe = (c.extra.get("metadata") or {}).get("probe")
+        if isinstance(probe, dict) and not probe.get("ok"):
+            failed[c.external_id] = probe
+    if not failed:
+        return 0
+    stored = await stored_probes(db, list(failed))
+    carried = 0
+    for c in cams:
+        probe = failed.get(c.external_id)
+        if probe is None:
+            continue
+        merged = carry_stream_facts(probe, stored.get(c.external_id))
+        if merged is not probe:
+            c.extra["metadata"]["probe"] = merged
+            carried += 1
+    return carried
+
+
 async def ensure_relay_policies(db: AsyncSession) -> dict[str, int]:
-    """Re-assert the relay-source policy on every non-retired camera with a source URL (not only the rows this
-    import touched, so a camera whose `anpr_enabled` flag was flipped by hand is covered too). Returns counts:
-    `persistent` (cameras that must hold one upstream connection), `applied` (paths actually re-configured —
-    each one restarts that relay source once, spaced 3 s apart) and `failed`."""
-    cams = (await db.execute(select(Camera).where(Camera.status != "retired", Camera.rtsp_url.isnot(None)))).scalars().all()
+    """Re-assert the relay-source policy on every non-retired camera with a source URL (not only
+    the rows this import touched, so a camera whose `anpr_enabled` flag was flipped by hand is
+    covered too). Returns counts: `persistent` (cameras that must hold one upstream connection),
+    `applied` (paths actually re-configured — each one restarts that relay source once, spaced 3 s
+    apart) and `failed`."""
+    stmt = select(Camera).where(Camera.status != "retired", Camera.rtsp_url.isnot(None))
+    cams = (await db.execute(stmt)).scalars().all()
     out = {"persistent": 0, "applied": 0, "failed": 0}
     for cam in cams:
         if relay_policy(cam) == PERSISTENT:
@@ -242,12 +326,13 @@ async def ensure_relay_policies(db: AsyncSession) -> dict[str, int]:
 
 
 def apply_probe(cam: SourceCamera, res: ProbeResult, at: str) -> dict[str, Any]:
-    """Fold a probe result into the SourceCamera (codec/resolution/fps/live + metadata.probe); returns the
-    per-camera report row. `live` is True on success, False when the server definitively refused the path
-    (4xx/5xx, unknown path) and None (unknown → still health-probed later) on a timeout or network error.
-    A 401/403 (`kind` "auth") refuses our credentials or this client, not the camera, so it is unknown too:
-    `live=false` would stop the health poller from ever probing the camera again (`import_row` carries the
-    null into the upsert so it also clears a stored false)."""
+    """Fold a probe result into the SourceCamera (codec/resolution/fps/live + metadata.probe);
+    returns the per-camera report row. `live` is True on success, False when the server
+    definitively refused the path (4xx/5xx, unknown path) and None (unknown → still health-probed
+    later) on a timeout or network error. A 401/403 (`kind` "auth") refuses our credentials or this
+    client, not the camera, so it is unknown too: `live=false` would stop the health poller from
+    ever probing the camera again (`import_row` carries the null into the upsert so it also clears
+    a stored false). A failed probe's stream facts are filled in later (`keep_stream_facts`)."""
     if res.ok:
         cam.codec = res.codec or "UNKNOWN"
         cam.resolution = res.resolution
@@ -260,18 +345,25 @@ def apply_probe(cam: SourceCamera, res: ProbeResult, at: str) -> dict[str, Any]:
             kind = "auth"
         cam.live = False if kind == "definitive" else None
     meta = cam.extra.setdefault("metadata", {})
-    meta["probe"] = {"at": at, "ok": res.ok, "codec": res.codec, "resolution": res.resolution, "fps": res.fps, "profile": res.profile, "b_frames": res.b_frames, "duration_ms": res.duration_ms, "error": res.error, "kind": kind}
+    meta["probe"] = {
+        "at": at, "ok": res.ok, "codec": res.codec, "resolution": res.resolution, "fps": res.fps,
+        "profile": res.profile, "b_frames": res.b_frames, "duration_ms": res.duration_ms,
+        "error": res.error, "kind": kind,
+    }
     return {
-        "external_id": cam.external_id, "name": cam.name, "ok": res.ok, "codec": res.codec, "resolution": res.resolution,
-        "fps": res.fps, "live": cam.live, "duration_ms": res.duration_ms, "error": res.error,
-        "location_confidence": cam.extra.get("location_confidence"), "department_code": cam.department_code,
+        "external_id": cam.external_id, "name": cam.name, "ok": res.ok, "codec": res.codec,
+        "resolution": res.resolution, "fps": res.fps, "live": cam.live,
+        "duration_ms": res.duration_ms, "error": res.error,
+        "location_confidence": cam.extra.get("location_confidence"),
+        "department_code": cam.department_code,
         "transcode": (res.codec == "H265" or bool(res.b_frames)), "b_frames": res.b_frames,
     }
 
 
 @dataclass
 class CatalogueProbe:
-    """Probe phase of an import: report rows (catalogue order), cameras dialled, wall time, summary warnings."""
+    """Probe phase of an import: report rows (catalogue order), cameras dialled, wall time,
+    summary warnings."""
 
     rows: list[dict[str, Any]] = field(default_factory=list)
     probed: int = 0
@@ -309,9 +401,10 @@ async def probe_catalogue(
         paced.dial_offsets_s,
     )
     if skipped:
-        out.warnings.append(
-            {"row": 0, "external_id": None, "field": "probe", "message": f"{len(skipped)} cameras {message}"}
-        )
+        out.warnings.append({
+            "row": 0, "external_id": None, "field": "probe",
+            "message": f"{len(skipped)} cameras {message}",
+        })
         log.warning(
             "import probes stopped: %d consecutive credential refusals, %d cameras not dialled",
             AUTH_REFUSALS_BEFORE_STOP, len(skipped),
@@ -320,17 +413,24 @@ async def probe_catalogue(
 
 
 async def measure_first_stream(db: AsyncSession, outcome: ImportOutcome) -> int | None:
-    """Time from requesting the HLS manifest of the first live camera (starts the on-demand pull) until the relay
-    path reports ready (CONTRACT §5.2 / Amendments: the "onboarding time" figure)."""
+    """Time from requesting the HLS manifest of the first live camera (starts the on-demand pull)
+    until the relay path reports ready (CONTRACT §5.2 / Amendments: the "onboarding time")."""
     first_live = next((c for c in outcome.touched if c.live and c.rtsp_url), None)
     if first_live is None:
-        first_live = (
-            await db.execute(select(Camera).where(Camera.source == "sandbox", Camera.live.is_(True), Camera.rtsp_url.isnot(None), Camera.status != "retired").order_by(Camera.id).limit(1))
-        ).scalar_one_or_none()
+        stmt = (
+            select(Camera)
+            .where(
+                Camera.source == "sandbox", Camera.live.is_(True), Camera.rtsp_url.isnot(None),
+                Camera.status != "retired",
+            )
+            .order_by(Camera.id)
+            .limit(1)
+        )
+        first_live = (await db.execute(stmt)).scalar_one_or_none()
     if first_live is None:
         return None
     path = play_path(first_live.id, first_live.codec, getattr(first_live, "meta", None))
-    # the manifest request makes an idle on-demand path dial upstream; the wait is not part of the figure
+    # the manifest request makes an idle on-demand path dial upstream; the wait is not measured
     await dial_gate.wait()
     t0 = time.perf_counter()
     await mtx.trigger_hls(path)
@@ -347,7 +447,8 @@ async def run_sentinel_import(
     measure_first: bool = True,
     probe: bool = True,
 ) -> dict[str, Any]:
-    """Raises `CatalogueError` when no catalogue can be read (the router turns it into 502 upstream_error)."""
+    """Raises `CatalogueError` when no catalogue can be read (the router turns it into 502
+    upstream_error)."""
     started = utcnow()
     adapter = SentinelPortalAdapter(cameras_json=cameras_json, enrichment_csv=enrichment_csv)
     cams = await adapter.list_cameras()
@@ -357,19 +458,23 @@ async def run_sentinel_import(
         error = None if adapter.stream.configured else "stream credentials not configured"
         probed_phase = CatalogueProbe(rows=[unprobed_row(c, error) for c in cams])
     probe_rows, probed, probe_ms = probed_phase.rows, probed_phase.probed, probed_phase.ms
-    rows = [(i + 1, i, import_row(c)) for i, c in enumerate(cams)]
-    outcome = await upsert_cameras(
-        db, rows, source="sandbox", created_by=None, created_via="sandbox", scope=None, dry_run=dry_run,
-        department_aliases=cfg.get("catalogue.department_aliases") or {}, catalogue_defaults=True, match_any_source=True,
-    )
-    relay_policy_counts = {"persistent": 0, "applied": 0, "failed": 0}
     released: list[str] = []
     if not dry_run:
+        # before the upsert, which keeps the stored `live` wherever this import has no answer
         try:
             released = await release_auth_refusals(db)
         except Exception:  # noqa: BLE001
             await db.rollback()
             log.exception("releasing cameras held at live=false by a credential refusal failed")
+    await keep_stream_facts(db, cams)
+    rows = [(i + 1, i, import_row(c)) for i, c in enumerate(cams)]
+    outcome = await upsert_cameras(
+        db, rows, source="sandbox", created_by=None, created_via="sandbox", scope=None,
+        dry_run=dry_run, department_aliases=cfg.get("catalogue.department_aliases") or {},
+        catalogue_defaults=True, match_any_source=True,
+    )
+    relay_policy_counts = {"persistent": 0, "applied": 0, "failed": 0}
+    if not dry_run:
         try:
             relay_policy_counts = await ensure_relay_policies(db)
         except Exception:  # noqa: BLE001
@@ -385,19 +490,25 @@ async def run_sentinel_import(
     h265 = sum(1 for p in probe_rows if p["codec"] == "H265")
     warnings = [w.as_dict() for w in outcome.warnings]
     warnings.extend(adapter.warnings)
-    warnings.extend({"row": 0, "external_id": None, "field": "catalogue", "message": w} for w in adapter.info.warnings)
+    warnings.extend(
+        {"row": 0, "external_id": None, "field": "catalogue", "message": w}
+        for w in adapter.info.warnings
+    )
     warnings.extend(probed_phase.warnings)
     if released:
-        warnings.append(
-            {"row": 0, "external_id": None, "field": "live", "message": released_message(len(released))}
-        )
+        warnings.append({
+            "row": 0, "external_id": None, "field": "live",
+            "message": released_message(len(released)),
+        })
     return {
         "source": "sentinel_portal",
         "catalogue_mode": adapter.info.mode,
         "source_url": adapter.info.source,
         "enrichment_source": adapter.enrichment_origin,
         "enrichment_rows": len(adapter.enrichment.rows) if adapter.enrichment else 0,
-        "enrichment_confidence": adapter.enrichment.confidence_counts if adapter.enrichment else None,
+        "enrichment_confidence": (
+            adapter.enrichment.confidence_counts if adapter.enrichment else None
+        ),
         "missing_enrichment": adapter.missing_enrichment,
         "started_at": iso_z(started),
         "finished_at": iso_z(finished),
@@ -424,10 +535,18 @@ async def run_sentinel_import(
     }
 
 
+_AUDIT_KEYS = (
+    "source", "catalogue_mode", "source_url", "enrichment_source", "enrichment_rows",
+    "started_at", "finished_at", "duration_ms", "fetched", "added", "updated", "unchanged",
+    "relay_paths_created", "relay_paths_failed", "relay_persistent", "relay_policy_applied",
+    "anpr_enabled", "first_stream_ready_ms", "probed", "probe_ok", "probe_h265", "probe_ms",
+    "dry_run",
+)
+
+
 def audit_summary(summary: dict[str, Any]) -> dict[str, Any]:
     """Counts only (no per-camera rows, no error strings) for the audit `after` column."""
-    keep = ("source", "catalogue_mode", "source_url", "enrichment_source", "enrichment_rows", "started_at", "finished_at", "duration_ms", "fetched", "added", "updated", "unchanged", "relay_paths_created", "relay_paths_failed", "relay_persistent", "relay_policy_applied", "anpr_enabled", "first_stream_ready_ms", "probed", "probe_ok", "probe_h265", "probe_ms", "dry_run")
-    out = {k: summary.get(k) for k in keep}
+    out = {k: summary.get(k) for k in _AUDIT_KEYS}
     out["errors"] = len(summary.get("errors") or [])
     out["warnings"] = len(summary.get("warnings") or [])
     out["missing_enrichment"] = len(summary.get("missing_enrichment") or [])
