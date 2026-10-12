@@ -5,7 +5,8 @@ worker part of it is: track OCR -> vote window -> accept -> batch POST. These te
 loop changes of 13 Oct 2026 without touching what is voted:
 
 * a batch holding a valid-format (alertable) read is posted in the tick that accepts it instead
-  of waiting for the next ``POST_BATCH_S`` period; everything else keeps the periodic batch;
+  of waiting for the next ``POST_BATCH_S`` period, with everything else pending for the camera;
+  a batch without one keeps the periodic tick;
 * a camera's vote expiry also runs right after its own frame (``Pipeline._after_frame``), so a
   read does not wait for the other cameras' frames - but a window is never closed early.
 
@@ -56,20 +57,24 @@ def make_pipeline(camera_ids=(1,), **overrides) -> Pipeline:
     p.voter = Voter(window_s=settings.vote_window_s)
     p.sightings = SightingTracker(close_after_s=settings.sighting_close_s)
     p.cameras = {}
-    p.timing = {"detect_ms": 0.0, "ocr_ms": 0.0, "objects_ms": 0.0, "frames": 0, "ocr_calls": 0, "object_calls": 0}
+    p.timing = {"detect_ms": 0.0, "ocr_ms": 0.0, "objects_ms": 0.0, "frames": 0,
+                "ocr_calls": 0, "object_calls": 0}
     for cid in camera_ids:
-        cam = CameraWorker(CameraConfig(cid, str(cid), f"cam {cid}", f"/media/none/cam_{cid}.mp4"), settings, p)
-        cam.last_flush_mono = time.monotonic()      # a periodic batch has just gone: the next one is POST_BATCH_S away
+        cfg = CameraConfig(cid, str(cid), f"cam {cid}", f"/media/none/cam_{cid}.mp4")
+        cam = CameraWorker(cfg, settings, p)
+        # a periodic batch has just gone: the next one is POST_BATCH_S away
+        cam.last_flush_mono = time.monotonic()
         p.cameras[cid] = cam
     return p
 
 
-def cand(camera_id: int, plate: str, age_s: float, conf: float = 0.9, now: datetime | None = None) -> Candidate:
+def cand(camera_id: int, plate: str, age_s: float, conf: float = 0.9,
+         now: datetime | None = None) -> Candidate:
     now = now or datetime.now(timezone.utc)
     return Candidate(
-        camera_id=camera_id, captured_at=now - timedelta(seconds=age_s), stream_pts=0.0, frame_index=0,
-        plate_raw=plate, plate_norm=plate, is_valid_format=False, confidence=conf, bbox=(10, 20, 120, 30),
-        crop_jpeg=b"\xff\xd8\xff" + plate.encode(), frame=None,
+        camera_id=camera_id, captured_at=now - timedelta(seconds=age_s), stream_pts=0.0,
+        frame_index=0, plate_raw=plate, plate_norm=plate, is_valid_format=False, confidence=conf,
+        bbox=(10, 20, 120, 30), crop_jpeg=b"\xff\xd8\xff" + plate.encode(), frame=None,
     )
 
 
@@ -79,7 +84,8 @@ def detections(p: Pipeline, camera_id: int | None = None) -> list[dict]:
         assert job.kind == "detections"
         job.call()
     p.sender.jobs.clear()
-    return [payload for payload, _files in p.client.posted if camera_id is None or payload["camera_id"] == camera_id]
+    return [payload for payload, _files in p.client.posted
+            if camera_id is None or payload["camera_id"] == camera_id]
 
 
 # ---- immediate batch for alertable reads ------------------------------------------------
@@ -89,7 +95,8 @@ def test_valid_read_is_posted_in_the_tick_that_accepts_it():
     p.voter.add(cand(1, VALID, age_s=3.2))           # window (3 s) elapsed
     before = cam.last_flush_mono
 
-    p._tick_time_based(datetime.now(timezone.utc))   # POST_BATCH_S has NOT elapsed since the last batch
+    # POST_BATCH_S has NOT elapsed since the last batch
+    p._tick_time_based(datetime.now(timezone.utc))
 
     sent = detections(p, 1)
     assert len(sent) == 1
@@ -132,6 +139,32 @@ def test_pending_invalid_read_rides_with_the_next_valid_one():
     assert [r["crop_file"] for r in sent[0]["reads"]] == ["crop_0", "crop_1"]
 
 
+def test_urgent_batch_carries_everything_pending_for_the_camera():
+    # the CONTRACT 7.2 amendment of 13 Oct 2026: the immediate batch is a normal batch - it takes
+    # every pending item of the camera, not just the alertable read
+    p = make_pipeline()
+    cam = p.cameras[1]
+    p.voter.add(cand(1, INVALID, age_s=3.6))
+    p._tick_time_based(datetime.now(timezone.utc))
+    count = {"minute": "2026-10-13T10:00:00Z", "class": "car", "count": 3}
+    cam.pending.object_counts.append(count)
+    cam.pending.events.append(({"type": "loop_reset", "occurred_at": datetime.now(timezone.utc),
+                                "note": "test"}, None))
+    assert p.sender.jobs == []                        # nothing alertable yet
+
+    p.voter.add(cand(1, VALID, age_s=3.2))
+    p._after_frame(cam)
+
+    sent = detections(p, 1)
+    assert len(sent) == 1
+    payload = sent[0]
+    assert [r["plate_norm"] for r in payload["reads"]] == [INVALID, VALID]
+    assert sorted(s["plate_norm"] for s in payload["sightings"]) == sorted([INVALID, VALID])
+    assert payload["object_counts"] == [count]
+    assert [e["type"] for e in payload["events"]] == ["loop_reset"]
+    assert cam.pending.empty() and p.sightings.drain_dirty(1) == []
+
+
 def test_urgent_batch_does_not_add_a_periodic_batch_within_the_period():
     p = make_pipeline()
     cam = p.cameras[1]
@@ -163,7 +196,7 @@ def test_after_frame_posts_the_cameras_elapsed_read_and_leaves_other_cameras_alo
     sent = detections(p)
     assert [(s["camera_id"], [r["plate_norm"] for r in s["reads"]]) for s in sent] == [(1, [VALID])]
     assert p.voter.open_buckets(1) == 0
-    assert p.voter.open_buckets(2) == 1                # camera 2's frame may still add to its bucket
+    assert p.voter.open_buckets(2) == 1   # camera 2's frame may still add to its bucket
     p._tick_time_based(datetime.now(timezone.utc))     # the loop tick still covers every camera
     assert [[r["plate_norm"] for r in s["reads"]] for s in detections(p, 2)] == [["GJ27XY3456"]]
 
@@ -191,7 +224,7 @@ def test_after_frame_handles_a_pending_discontinuity_before_expiry():
     p.voter.add(cand(1, VALID, age_s=1.0))             # window still open
     cam._on_discontinuity(1, "decoder restart (test)", None, None)
 
-    p._after_frame(cam)                                # same order as the loop tick: flush votes, close sightings
+    p._after_frame(cam)   # same order as the loop tick: flush votes, close sightings
 
     sent = detections(p, 1)
     assert len(sent) == 1
@@ -205,7 +238,8 @@ def test_process_ready_frames_sends_a_read_before_the_next_cameras_frame():
     order: list[tuple[int, int]] = []
 
     def fake_process_frame(cam, frame):
-        # what a track ending in this frame does: its best shots (captured 3.2 s ago) are OCR'd and voted
+        # what a track ending in this frame does: its best shots (captured 3.2 s ago) are
+        # OCR'd and voted
         order.append((cam.cfg.id, len(p.sender.jobs)))
         p.voter.add(cand(cam.cfg.id, VALID if cam.cfg.id == 1 else "GJ27XY3456", age_s=3.2))
 
@@ -217,7 +251,8 @@ def test_process_ready_frames_sends_a_read_before_the_next_cameras_frame():
     # camera 1's read was queued before camera 2's frame was processed
     assert order == [(1, 0), (2, 1)]
     sent = detections(p)
-    assert [(s["camera_id"], [r["plate_norm"] for r in s["reads"]]) for s in sent] == [(1, [VALID]), (2, ["GJ27XY3456"])]
+    assert [(s["camera_id"], [r["plate_norm"] for r in s["reads"]]) for s in sent] == [
+        (1, [VALID]), (2, ["GJ27XY3456"])]
     assert p._process_ready_frames() is False          # no new frames
 
 

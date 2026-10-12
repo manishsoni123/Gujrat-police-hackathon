@@ -132,7 +132,8 @@ class PendingBatch:
     reads: list[VotedRead] = field(default_factory=list)
     object_counts: list[dict[str, Any]] = field(default_factory=list)
     events: list[tuple[dict[str, Any], bytes | None]] = field(default_factory=list)
-    urgent: bool = False        # holds a valid-format (alertable) read: sent now, not on the next POST_BATCH_S tick
+    # holds a valid-format (alertable) read: sent now, not on the next POST_BATCH_S tick
+    urgent: bool = False
 
     def empty(self) -> bool:
         return not (self.reads or self.object_counts or self.events)
@@ -705,7 +706,7 @@ class Pipeline:
         cam.pending.events.append((event, None))
 
     def _tick_camera(self, cam: CameraWorker, now: datetime) -> None:
-        """Discontinuities, then vote-window expiry, of one camera; accepted reads join its pending batch."""
+        """One camera's discontinuities, then its vote expiry; accepted reads join its batch."""
         for reason, before, after in cam.take_discontinuities():
             self._handle_discontinuity(cam, reason, before, after)
         self._accept_reads(cam, self.voter.expire(now, cam.cfg.id))
@@ -713,11 +714,14 @@ class Pipeline:
     def _flush_if_urgent(self, cam: CameraWorker, mono: float) -> bool:
         """Send the camera's batch now when it holds a valid-format read (alert latency).
 
-        Waiting for the next ``POST_BATCH_S`` tick held an accepted read for up to a period plus a
-        loop iteration (accept -> API ingest p95 1.2 s on the 12 Oct live run) before it could
-        raise its watchlist alert. Only alertable reads jump the queue; invalid-format reads, sighting
-        closures, counts and events keep the periodic batch. The periodic timer restarts, so the
-        next periodic batch of this camera is still at least ``POST_BATCH_S`` away.
+        Waiting for the next ``POST_BATCH_S`` tick held an accepted read for up to a period plus
+        a loop iteration (accept -> API ingest p95 1.2 s on the 12 Oct live run) before it could
+        raise its watchlist alert. Only a valid-format read (the only kind the matcher alerts on)
+        triggers this; the batch then also carries everything else pending for the camera
+        (invalid-format reads, dirty or closed sightings, counts, events). A batch without one
+        waits for the periodic tick. The periodic timer restarts, so the camera's next periodic
+        batch is still at least ``POST_BATCH_S`` away. CONTRACT section 7.2 amendment of
+        13 Oct 2026.
         """
         if not cam.pending.urgent:
             return False
@@ -742,7 +746,7 @@ class Pipeline:
         self._flush_if_urgent(cam, time.monotonic())
 
     def _process_ready_frames(self) -> bool:
-        """Process the newest frame of every camera that has one; True when any frame was processed."""
+        """Process each camera's newest frame, if any; True when at least one was processed."""
         busy = False
         for cam in list(self.cameras.values()):
             frame = cam.take_frame()
