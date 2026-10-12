@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -110,6 +112,78 @@ def age_years(install_date: date | None) -> float | None:
     return round((utcnow().date() - install_date).days / 365.25, 1)
 
 
+# Camera `anpr_status` (CONTRACT Amendments 2026-10-13): what the live ANPR worker really does with a camera, as
+# opposed to `anpr_enabled` (what the operator asked for). The live worker only takes the lowest-id
+# `ANPR_MAX_CAMERAS` enabled cameras, and a camera it does take may be reconnecting.
+ANPR_STATUSES = ("off", "live", "starting", "reconnecting", "queued", "no_worker")
+# decoder state of a heartbeat entry (anpr/decode.py) → camera status; `stopped` means not processed
+_DECODER_STATE_STATUS = {"running": "live", "starting": "starting", "reconnecting": "reconnecting", "error": "reconnecting"}
+_PROCESSING_RANK = {"live": 0, "starting": 1, "reconnecting": 2}
+
+
+@dataclass(frozen=True)
+class AnprLiveView:
+    """What the non-stale live-mode ANPR workers report, loaded once per request (`health_poller.live_anpr_view`).
+
+    `workers` = live workers that are up; `states` = camera id → best status any of them reports for it
+    (`live` > `starting` > `reconnecting`).
+    """
+
+    workers: int = 0
+    states: dict[int, str] = field(default_factory=dict)
+
+
+def anpr_live_view(worker_cameras: Iterable[list[dict[str, Any]] | None]) -> AnprLiveView:
+    """Fold the heartbeat `cameras` lists of the non-stale live workers into one view.
+
+    A worker whose every entry is `stopped` has sent its shutdown heartbeat and is not counted. An entry without a
+    state is `running` (the heartbeat schema default); an unknown state counts as `reconnecting` (listed, no frames).
+    """
+    workers = 0
+    states: dict[int, str] = {}
+    for cams in worker_cameras:
+        entries = [e for e in (cams or []) if isinstance(e, dict)]
+        if entries and all(e.get("state") == "stopped" for e in entries):
+            continue
+        workers += 1
+        for e in entries:
+            state = e.get("state") or "running"
+            if state == "stopped":
+                continue
+            try:
+                cid = int(e.get("id"))
+            except (TypeError, ValueError):
+                continue
+            status = _DECODER_STATE_STATUS.get(state, "reconnecting")
+            prev = states.get(cid)
+            if prev is None or _PROCESSING_RANK[status] < _PROCESSING_RANK[prev]:
+                states[cid] = status
+    return AnprLiveView(workers, states)
+
+
+def anpr_eligible(c: Camera) -> bool:
+    """The cameras `/internal/anpr-config?mode=live` hands the worker: ANPR enabled, not retired, with a source URL."""
+    return bool(c.anpr_enabled) and c.status != "retired" and bool(c.rtsp_url)
+
+
+def anpr_status(c: Camera, view: AnprLiveView | None) -> str | None:
+    """`off` | `live` | `starting` | `reconnecting` | `queued` | `no_worker`; None only when no view was loaded.
+
+    - `off`: not handed to the live worker (ANPR disabled, retired, or no source URL);
+    - `live` / `starting` / `reconnecting`: a non-stale live worker lists it in that decoder state;
+    - `queued`: a live worker is up but does not list it (over `ANPR_MAX_CAMERAS`, or not picked up yet);
+    - `no_worker`: no non-stale live worker at all.
+    """
+    if not anpr_eligible(c):
+        return "off"
+    if view is None:
+        return None
+    listed = view.states.get(c.id)
+    if listed is not None:
+        return listed
+    return "queued" if view.workers else "no_worker"
+
+
 def camera_summary(c: Camera) -> dict[str, Any]:
     d = lookups.dept_sync(c.department_id)
     return {
@@ -128,7 +202,7 @@ def camera_summary(c: Camera) -> dict[str, Any]:
     }
 
 
-def camera_full(c: Camera, is_admin: bool = False, uptime_24h_pct: float | None = None) -> dict[str, Any]:
+def camera_full(c: Camera, is_admin: bool = False, uptime_24h_pct: float | None = None, anpr_view: AnprLiveView | None = None) -> dict[str, Any]:
     d = lookups.dept_sync(c.department_id)
     return {
         "id": c.id,
@@ -168,6 +242,7 @@ def camera_full(c: Camera, is_admin: bool = False, uptime_24h_pct: float | None 
         "nvr_id": c.nvr_id,
         "onvif_host": c.onvif_host,
         "anpr_enabled": c.anpr_enabled,
+        "anpr_status": anpr_status(c, anpr_view),
         "record_enabled": c.record_enabled,
         "status": c.status,
         "last_seen_at": iso_z(c.last_seen_at),

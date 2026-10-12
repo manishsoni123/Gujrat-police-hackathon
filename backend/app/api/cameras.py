@@ -23,6 +23,7 @@ from app.services import lookups, serializers
 from app.services.audit import set_audit
 from app.services.camera_importer import ImportOutcome, ensure_relay_paths, upsert_cameras, validate_row
 from app.services.csv_importer import CAMERA_TEMPLATE_HEADER, camera_template_csv
+from app.services.health_poller import live_anpr_view
 from app.services.mediamtx_client import client as mtx
 from app.services.mediamtx_client import relay_path
 from app.services.report_builder import build_csv, rows_hash, store_report
@@ -127,8 +128,9 @@ async def list_cameras(user: CurrentUser, db: DbDep, page: PageParams = Depends(
     stmt = stmt.order_by(col.desc().nulls_last() if order == "desc" else col.asc().nulls_last(), Camera.id.asc()).offset(page.offset).limit(page.page_size)
     cams = (await db.execute(stmt)).scalars().all()
     up = await uptime_map(db, [c.id for c in cams])
+    anpr_view = await live_anpr_view(db)  # one heartbeat read for the whole page (camera `anpr_status`)
     is_admin = user.role == "admin"
-    return {"items": [serializers.camera_full(c, is_admin, up.get(c.id)) for c in cams], "total": int(total), "page": page.page, "page_size": page.page_size}
+    return {"items": [serializers.camera_full(c, is_admin, up.get(c.id), anpr_view) for c in cams], "total": int(total), "page": page.page, "page_size": page.page_size}
 
 
 @router.get("/departments", dependencies=[Depends(require_permission("cameras.read"))])
@@ -196,7 +198,7 @@ async def create_camera(
     stream_probe = await _probe_and_apply(db, cam) if probe else None
     await serializers.warm(db)
     set_audit(request, entity="camera", entity_id=cam.id, after={**serializers.camera_diff(cam), "relay_paths_created": outcome.relay_paths_created, "warnings": [w.as_dict(True) for w in outcome.warnings], "stream_probe": stream_probe})
-    return {**serializers.camera_full(cam, user.role == "admin"), "stream_probe": stream_probe}
+    return {**serializers.camera_full(cam, user.role == "admin", anpr_view=await live_anpr_view(db)), "stream_probe": stream_probe}
 
 
 async def _probe_and_apply(db: AsyncSession, cam: Camera) -> dict[str, Any] | None:
@@ -224,7 +226,7 @@ async def get_camera(camera_id: int, user: CurrentUser, db: DbDep):
     recent_alerts = (await db.execute(select(func.count()).select_from(Alert).where(Alert.camera_id == cam.id, Alert.created_at >= since))).scalar() or 0
     zones = (await db.execute(select(Zone).where(Zone.camera_id == cam.id).order_by(Zone.id))).scalars().all()
     snap = f"snapshots/cam_{cam.id}.jpg"
-    data = serializers.camera_full(cam, user.role == "admin", up.get(cam.id))
+    data = serializers.camera_full(cam, user.role == "admin", up.get(cam.id), await live_anpr_view(db))
     data.update({
         "recent_alerts": int(recent_alerts), "reads_24h": int(reads_24h), "sightings_24h": int(sightings_24h),
         "snapshot_url": media_url(snap) if abs_path(snap).exists() else None,
@@ -311,7 +313,7 @@ async def update_camera(
         relay_info["stream_probe"] = stream_probe
     after = serializers.camera_diff(cam)
     set_audit(request, entity="camera", entity_id=cam.id, before={k: v for k, v in before.items() if after.get(k) != v}, after={**{k: v for k, v in after.items() if before.get(k) != v}, **relay_info})
-    return {**serializers.camera_full(cam, user.role == "admin"), "stream_probe": stream_probe}
+    return {**serializers.camera_full(cam, user.role == "admin", anpr_view=await live_anpr_view(db)), "stream_probe": stream_probe}
 
 
 @router.delete("/cameras/{camera_id}", status_code=204, dependencies=[Depends(require_permission("cameras.write"))])
@@ -356,7 +358,7 @@ async def update_maintenance(camera_id: int, body: MaintenanceUpdate, user: Curr
     after = {k: serializers.camera_diff(cam)[k] for k in ("maintenance_status", "maintenance_note", "amc_vendor", "amc_expiry")}
     after["last_maintenance_at"] = iso_z(cam.last_maintenance_at)
     set_audit(request, entity="camera", entity_id=cam.id, before=before, after=after)
-    return serializers.camera_full(cam, user.role == "admin")
+    return serializers.camera_full(cam, user.role == "admin", anpr_view=await live_anpr_view(db))
 
 
 @router.get("/cameras/{camera_id}/health", dependencies=[Depends(require_permission("cameras.read"))])

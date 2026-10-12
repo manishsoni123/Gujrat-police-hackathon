@@ -15,7 +15,7 @@ import { camerasApi, detectionsApi, eventsApi, objectsApi } from '@/api';
 import type { Detection, EventItem } from '@/api/types';
 import { useReadsSocket } from '@/ws/useReadsSocket';
 import { useHealthSocket } from '@/ws/useHealthSocket';
-import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolTag, AmcTag, LocationConfidenceTag, WatchlistHitTag, codecLabel } from '@/components/Tags';
+import { StatusTag, MaintenanceTag, DepartmentTag, CodecTag, EventTypeTag, BoolTag, AmcTag, LocationConfidenceTag, WatchlistHitTag, AnprTag, codecLabel } from '@/components/Tags';
 import { rowProps } from '@/hooks/useListQuery';
 import { IstTime } from '@/components/IstTime';
 import { PlateText } from '@/components/PlateText';
@@ -139,7 +139,8 @@ export function CameraDetailPage() {
   const navigate = useNavigate();
   const canWrite = usePermission('cameras.write');
   const canEvent = usePermission('events.write');
-  const cam = useQuery({ queryKey: ['cameras', 'detail', cameraId], queryFn: () => camerasApi.get(cameraId), enabled: Number.isFinite(cameraId) });
+  // An ANPR camera is re-read every 30 s so the ANPR pill follows the worker (reconnecting, queued, worker gone).
+  const cam = useQuery({ queryKey: ['cameras', 'detail', cameraId], queryFn: () => camerasApi.get(cameraId), enabled: Number.isFinite(cameraId), refetchInterval: (q) => (q.state.data?.anpr_enabled ? 30_000 : false) });
   const seedReads = useQuery({ queryKey: ['detections', 'camera', cameraId, 'seed'], queryFn: () => detectionsApi.list({ camera_id: cameraId, page_size: 30 }), enabled: Number.isFinite(cameraId) });
   const events = useQuery({ queryKey: ['events', 'camera', cameraId], queryFn: () => eventsApi.list({ camera_id: cameraId, page_size: 50 }), enabled: Number.isFinite(cameraId) });
   const ws = useReadsSocket(Number.isFinite(cameraId) ? cameraId : null);
@@ -191,7 +192,7 @@ export function CameraDetailPage() {
             <MaintenanceTag status={c.maintenance_status} size="small" />
             <DepartmentTag code={c.department_code} name={c.department_name} size="small" />
             <CodecTag codec={c.codec} />
-            {c.anpr_enabled ? <Tag color="blue" style={{ margin: 0 }}>ANPR live</Tag> : null}
+            <AnprTag status={c.anpr_status} enabled={c.anpr_enabled} size="small" />
             {c.record_enabled ? <Tag style={{ margin: 0 }}>REC 12 h</Tag> : null}
             <span style={{ color: '#6B7280' }}>
               #{c.external_id} · {c.district ?? '—'} {c.police_station ? `· ${c.police_station}` : ''}

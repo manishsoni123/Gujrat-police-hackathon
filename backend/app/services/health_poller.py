@@ -455,6 +455,26 @@ def _int_ids(cams: list[dict[str, Any]]) -> list[int]:
     return out
 
 
+def heartbeat_stale(last_heartbeat_at: datetime | None, now: datetime | None = None) -> bool:
+    """CONTRACT §5.5: a worker is stale when its last heartbeat is older than 3 × `HEARTBEAT_S`.
+
+    The one rule behind `anpr_workers[].stale` (/health/summary, /dashboard/stats) and the camera `anpr_status`.
+    """
+    if last_heartbeat_at is None:
+        return True
+    return ((now or utcnow()) - last_heartbeat_at) > timedelta(seconds=3 * settings.HEARTBEAT_S)
+
+
+async def live_anpr_view(db: AsyncSession) -> serializers.AnprLiveView:
+    """Input of the camera `anpr_status`: one read of `anpr_workers` per request (list or detail), never per camera.
+
+    Only live-mode workers count (a pre-index worker never raises live alerts); stale rows are dropped.
+    """
+    rows = (await db.execute(select(AnprWorker.cameras, AnprWorker.last_heartbeat_at).where(AnprWorker.mode == "live"))).all()
+    now = utcnow()
+    return serializers.anpr_live_view(cams for cams, last_hb in rows if not heartbeat_stale(last_hb, now))
+
+
 async def worker_status(db: AsyncSession, scope: Scope | None = None) -> list[dict[str, Any]]:
     """Heartbeat rows for /health/summary, /dashboard/stats and the `anpr_status` envelope.
 
@@ -467,7 +487,7 @@ async def worker_status(db: AsyncSession, scope: Scope | None = None) -> list[di
     out = []
     for w in rows:
         cams = [c for c in (w.cameras or []) if allowed is None or c.get("id") in allowed]
-        stale = (now - w.last_heartbeat_at) > timedelta(seconds=3 * settings.HEARTBEAT_S)
+        stale = heartbeat_stale(w.last_heartbeat_at, now)
         out.append(worker_item(w.id, w.mode, w.gpu, w.version, w.detector, cams, w.last_heartbeat_at, stale, w.extra, w.started_at))
     return out
 
