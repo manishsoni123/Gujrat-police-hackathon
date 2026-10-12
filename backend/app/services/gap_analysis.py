@@ -332,18 +332,17 @@ async def _zero_coverage(db: AsyncSession, scope_sql: str, scope_params: dict, d
     count_sql = text(cte + " SELECT district, count(*) AS n FROM zero GROUP BY district")
     feat_sql = text(cte + " SELECT district, i, j, ST_AsGeoJSON(ST_Transform(geom, 4326), 5) AS gj FROM zero ORDER BY district, j, i LIMIT :cap")
     try:
-        await db.execute(text(f"SET LOCAL statement_timeout = {ZERO_COVERAGE_TIMEOUT_MS}"))
-        counts = {r.district: int(r.n) for r in (await db.execute(count_sql, params)).all()}
-        rows = (await db.execute(feat_sql, {**params, "cap": MAX_CELLS})).all()
+        # A SAVEPOINT, not a session rollback: a timeout must not expire the Camera rows the caller already
+        # loaded (a full rollback did, and the next attribute read lazy-loaded outside the async context:
+        # MissingGreenlet, 500). Rolling the savepoint back also undoes the SET LOCAL made inside it.
+        async with db.begin_nested():
+            await db.execute(text(f"SET LOCAL statement_timeout = {ZERO_COVERAGE_TIMEOUT_MS}"))
+            counts = {r.district: int(r.n) for r in (await db.execute(count_sql, params)).all()}
+            rows = (await db.execute(feat_sql, {**params, "cap": MAX_CELLS})).all()
+            await db.execute(text("SET LOCAL statement_timeout = 0"))
     except Exception as exc:  # noqa: BLE001 – timeout or PostGIS error: report empty rather than fail the whole report
         log.warning("zero-coverage grid skipped: %s", str(exc).splitlines()[0][:200])
-        await db.rollback()
         return [], {}, False
-    finally:
-        try:
-            await db.execute(text("SET LOCAL statement_timeout = 0"))
-        except Exception:  # noqa: BLE001
-            pass
     features = [
         {"type": "Feature", "geometry": json.loads(r.gj), "properties": {"district": r.district, "cell": f"r{r.j}c{r.i}"}}
         for r in rows
