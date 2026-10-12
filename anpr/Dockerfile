@@ -25,7 +25,7 @@ ENV CPU=1 \
     ONNXRUNTIME_PACKAGE=onnxruntime==1.19.2
 
 # ---------------------------------------------------------------------------
-# GPU base (not testable on the laptop; used on the CUDA VM with COMPOSE_PROFILES=gpu)
+# GPU base (COMPOSE_PROFILES=gpu; first run 12 Oct 2026 on an RTX 4050 laptop under Docker Desktop/WSL2)
 # ---------------------------------------------------------------------------
 FROM jrottenberg/ffmpeg:6.1-nvidia2204 AS ffmpeg-nvidia
 
@@ -33,12 +33,22 @@ FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime AS base-gpu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        fonts-dejavu-core curl ca-certificates libgomp1 libva2 libva-drm2 libvdpau1 \
+        fonts-dejavu-core curl ca-certificates libgomp1 libva2 libva-drm2 libvdpau1 libexpat1 \
     && rm -rf /var/lib/apt/lists/*
-# NVIDIA-enabled ffmpeg/ffprobe (NVDEC/NVENC) copied from the jrottenberg build.
+# NVIDIA-enabled ffmpeg/ffprobe (NVDEC/NVENC) copied from the jrottenberg build, plus the five CUDA 12.3
+# NPP libraries that binary links against (it does not start without them: "libnppig.so.12: cannot open").
 COPY --from=ffmpeg-nvidia /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
 COPY --from=ffmpeg-nvidia /usr/local/lib /usr/local/lib
-ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
+COPY --from=ffmpeg-nvidia \
+    /usr/local/cuda/targets/x86_64-linux/lib/libnppc.so.12 \
+    /usr/local/cuda/targets/x86_64-linux/lib/libnppicc.so.12 \
+    /usr/local/cuda/targets/x86_64-linux/lib/libnppidei.so.12 \
+    /usr/local/cuda/targets/x86_64-linux/lib/libnppif.so.12 \
+    /usr/local/cuda/targets/x86_64-linux/lib/libnppig.so.12 \
+    /usr/local/lib/
+# The pytorch runtime image has no /usr/local/cuda: its CUDA 12 / cuDNN 9 runtime ships as pip wheels under
+# site-packages/nvidia/*/lib, which onnxruntime-gpu's CUDA provider must find (else it silently falls back to CPU).
+ENV LD_LIBRARY_PATH=/usr/local/lib:/opt/conda/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:/opt/conda/lib/python3.11/site-packages/nvidia/cublas/lib:/opt/conda/lib/python3.11/site-packages/nvidia/cudnn/lib:/opt/conda/lib/python3.11/site-packages/nvidia/cufft/lib:/opt/conda/lib/python3.11/site-packages/nvidia/curand/lib:/opt/conda/lib/python3.11/site-packages/nvidia/cuda_nvrtc/lib:/opt/conda/lib/python3.11/site-packages/nvidia/nvjitlink/lib:${LD_LIBRARY_PATH} \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     CPU=0 \
     ONNXRUNTIME_PACKAGE=onnxruntime-gpu==1.19.2
