@@ -224,7 +224,8 @@ async def seed_watchlist(db: AsyncSession, seeds: Path) -> dict[str, int]:
             w = Watchlist(entity_type="vehicle", plate_norm=n.plate_norm)
             vehicles[n.plate_norm] = w
         else:
-            if r.get("name") in persons:
+            old_name = next((o for o, n in REV4_PERSON_RENAMES.items() if n == r.get("name")), None)
+            if r.get("name") in persons or old_name in persons:  # seeded before rev 4 under its old name
                 skipped += 1
                 continue
             w = Watchlist(entity_type="person", plate_norm=None)
@@ -234,14 +235,24 @@ async def seed_watchlist(db: AsyncSession, seeds: Path) -> dict[str, int]:
         w.added_by, w.hit_count, w.created_at, w.updated_at = (admin.id if admin else None), 0, now, now
         db.add(w)
         added += 1
-    upgraded = await _upgrade_watchlist_seed(db, vehicles, now)
+    upgraded = await _upgrade_watchlist_seed(db, vehicles, now, rows=rows, persons=persons)
     await db.commit()
     return {"added": added, "skipped": skipped, "upgraded": upgraded}
 
 
 # Revision of the seeded watchlist rows. Existing databases only ever *add* missing rows, so a
 # change to an already-seeded anchor row is applied once here, keyed by `seed.watchlist_rev`.
-WATCHLIST_SEED_REV = 3
+WATCHLIST_SEED_REV = 4
+
+# rev 4 (13 Oct 2026): every seed row is labelled as a demo entry, and the eleven plates read on the
+# government cameras carry no case at all (reason `other`, source `manual`, disclaimer in the notes) - a
+# real registration must never be shown next to an invented crime. Already-seeded rows get the CSV's
+# name/reason/source/notes once (vehicles by plate, persons by their old seed name).
+REV4_PERSON_RENAMES = {
+    "Ramesh K. (wanted – Ahmedabad PS)": "DEMO – fictional wanted person (FRS roadmap placeholder)",
+    "Unidentified body case UDB-2026-17": "DEMO – fictional unidentified-body case (AFIS/NAFIS placeholder)",
+    "Missing minor – Surat": "DEMO – fictional missing minor",
+}
 
 # rev 3 (5 Sept 2026, government feed): the fourteen synthetic filler plates of seed rev 1-2 (rows 7-20 of
 # the old CSV, never read by any camera) are retired - deactivated, never deleted, so alert history and
@@ -253,7 +264,25 @@ RETIRED_FILLER_PLATES = (
 RETIRED_NOTE = "retired by seed rev 3 (synthetic filler plate, never read on any feed; replaced by plates read on the government cameras)"
 
 
-async def _upgrade_watchlist_seed(db: AsyncSession, vehicles: dict[str, Watchlist], now: Any) -> int:
+def _apply_seed_text(w: Watchlist, row: dict[str, str], now: Any) -> bool:
+    """Copy a seed row's descriptive fields onto an existing watchlist entry; True when anything changed."""
+    want = {
+        "name": row.get("name") or None,
+        "reason": (row.get("reason") or "other").lower(),
+        "source": (row.get("source") or "manual").lower(),
+        "notes": row.get("notes") or None,
+    }
+    if all(getattr(w, k) == v for k, v in want.items()):
+        return False
+    for k, v in want.items():
+        setattr(w, k, v)
+    w.updated_at = now
+    return True
+
+
+async def _upgrade_watchlist_seed(db: AsyncSession, vehicles: dict[str, Watchlist], now: Any, *,
+                                  rows: list[dict[str, str]] | None = None,
+                                  persons: dict[str, Watchlist] | None = None) -> int:
     marker = await db.get(Setting, "seed.watchlist_rev")
     current = int(marker.value) if marker is not None and str(marker.value).isdigit() else 1
     upgraded = 0
@@ -271,6 +300,18 @@ async def _upgrade_watchlist_seed(db: AsyncSession, vehicles: dict[str, Watchlis
             if w is not None and w.id is not None and w.is_active:
                 w.is_active, w.updated_at = False, now
                 w.notes = (f"{w.notes} | " if w.notes else "") + RETIRED_NOTE
+                upgraded += 1
+    if current < 4 and rows:
+        by_new_name = {r.get("name"): r for r in rows if (r.get("entity_type") or "").lower() == "person"}
+        for r in rows:
+            if (r.get("entity_type") or "vehicle").lower() != "vehicle":
+                continue
+            w = vehicles.get(normalise(r.get("plate") or "").plate_norm)
+            if w is not None and w.id is not None and _apply_seed_text(w, r, now):
+                upgraded += 1
+        for old, new in REV4_PERSON_RENAMES.items():
+            w = (persons or {}).get(old)
+            if w is not None and w.id is not None and new in by_new_name and _apply_seed_text(w, by_new_name[new], now):
                 upgraded += 1
     if marker is None:
         db.add(Setting(key="seed.watchlist_rev", value=WATCHLIST_SEED_REV, is_secret=False, updated_at=now))

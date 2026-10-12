@@ -189,7 +189,7 @@ Two redundant 1 Gbps links per district into the state backbone suffice; 10 Gbps
 | Camera sub-stream (D1/CIF, 512 kbps) as the registered `rtsp_url` | 4× less traffic; ANPR only for large frontal plates | Border/remote districts |
 | Snapshot mode (1 fps JPEG, ~50–100 kbps) | Viewing without video | Wall tiles 5–16, mobile users |
 | On-demand relay (close after 60 s idle) | Zero traffic for idle cameras | All non-analysed cameras |
-| Edge inference, metadata-only uplink (~2 KB/s per camera) | 1,000× reduction versus centralising video | Every district |
+| Edge inference, metadata-only uplink (~2 KB/s per camera) | ≈ 125× less than centralising video (2 Mbps ≈ 250 KB/s per camera vs ~2 KB/s) | Every district |
 | Store-and-forward queue on the appliance (SQLite/Kafka local, hours of buffer) | No loss during WAN outages; alerts fire when the link returns | Every district |
 | Scheduled analytics windows | Analyse a camera only in its relevant hours | Markets, schools |
 

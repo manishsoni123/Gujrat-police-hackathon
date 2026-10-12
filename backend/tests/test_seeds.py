@@ -64,7 +64,13 @@ def test_watchlist_seed(seeds_dir: Path) -> None:
     assert len(real) == 11 and all("Government feed" in r["notes"] and "cam07" in r["notes"] for r in real)
     assert all(r["is_active"] != "false" for r in real)
     assert not set(plates) & set(RETIRED_FILLER_PLATES)
-    assert len({r["reason"] for r in real}) >= 4 and len({r["priority"] for r in real}) >= 3
+    assert len({r["priority"] for r in real}) >= 3
+    # seed rev 4: a real registration is never shown next to an invented case - demo label, no reason, no
+    # e-GujCop / VAHAN source, explicit disclaimer; every other row is labelled as a demo entry too
+    assert all(r["name"].startswith("DEMO TEST ENTRY – no real case") for r in real)
+    assert all(r["reason"] == "other" and r["source"] == "manual" and "NOT linked to any real case" in r["notes"] for r in real)
+    assert all(r["name"].startswith("DEMO") for r in rows)
+    assert not any(r["source"] in ("egujcop", "vahan") for r in rows if r["entity_type"] == "person")
 
 
 def test_pois_seed(seeds_dir: Path) -> None:
@@ -113,3 +119,42 @@ def test_cameras_sample_rows(seeds_dir: Path) -> None:
     assert rows[6]["department_code"] == "HOUSING_SOCIETY"  # row 7 unknown department → warning
     assert {r["district"] for r in rows} >= {"Valsad", "Dahod", "Ahmedabad", "Jamnagar", "Gir Somnath", "Devbhumi Dwarka"}
     assert {r["department_code"] for r in rows} >= {"FCS", "RTO", "POLICE"}
+
+
+def test_watchlist_seed_rev4_rewrites_seeded_rows_once(seeds_dir: Path) -> None:
+    """A database seeded at rev 3 gets the demo labels on its existing rows and no duplicate persons."""
+    import asyncio
+
+    from app.db.models import Setting, Watchlist
+    from app.seed import REV4_PERSON_RENAMES, WATCHLIST_SEED_REV, _upgrade_watchlist_seed
+
+    rows = _rows(seeds_dir / "watchlist_seed.csv")
+    old_case = Watchlist(id=7, entity_type="vehicle", plate_norm="GJ14AA3978", name="Wanted – Gir Somnath cheating case – read on cam07",
+                         reason="wanted", priority="high", source="egujcop", notes="Government feed: read on cam07", is_active=True)
+    anchor = Watchlist(id=1, entity_type="vehicle", plate_norm="GJ01AB1234", name="White Maruti Swift – FIR 123/2026 Sector 7 PS",
+                       reason="stolen", priority="critical", source="own", notes="old", is_active=True)
+    old_person = Watchlist(id=18, entity_type="person", plate_norm=None, name="Ramesh K. (wanted – Ahmedabad PS)",
+                           reason="wanted", priority="critical", source="egujcop", notes="FRS roadmap – no plate", is_active=True)
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.marker = Setting(key="seed.watchlist_rev", value=3, is_secret=False)
+            self.added: list[object] = []
+
+        async def get(self, model: object, key: str) -> Setting:
+            return self.marker
+
+        def add(self, obj: object) -> None:
+            self.added.append(obj)
+
+    db = FakeDb()
+    vehicles = {"GJ14AA3978": old_case, "GJ01AB1234": anchor}
+    persons = {old_person.name: old_person}
+    n = asyncio.run(_upgrade_watchlist_seed(db, vehicles, "now", rows=rows, persons=persons))
+    assert n == 3 and db.marker.value == WATCHLIST_SEED_REV == 4 and not db.added
+    assert old_case.name.startswith("DEMO TEST ENTRY – no real case") and old_case.reason == "other" and old_case.source == "manual"
+    assert "NOT linked to any real case" in old_case.notes and old_case.priority == "high" and old_case.is_active
+    assert anchor.name.startswith("DEMO – ") and anchor.reason == "stolen" and anchor.priority == "critical"
+    assert old_person.name == REV4_PERSON_RENAMES["Ramesh K. (wanted – Ahmedabad PS)"] and old_person.source == "manual"
+    # second run at rev 4: nothing left to do
+    assert asyncio.run(_upgrade_watchlist_seed(db, vehicles, "now", rows=rows, persons=persons)) == 0
