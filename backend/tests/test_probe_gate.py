@@ -2,9 +2,10 @@
 
 The Settings → Catalogue → Test probe (`SentinelPortalAdapter.probe_one`) waits on `dial_gate`
 right before its ffprobe dial, so repeated Test clicks, or a Test during an import or a relay
-switch, cannot open an upstream connection inside the 3 s spacing; and the adapter keeps no
-un-gated batch helper (the import dials through `sentinel_import.probe_paced`, see
-test_import_probes.py). DB-free; ffprobe and the gate are faked, nothing is dialled.
+switch, cannot open an upstream connection inside the 3 s spacing; the import dials the real
+adapter's raw `probe` through `sentinel_import.probe_paced`, one gate pass right before each dial
+(see also test_import_probes.py); and the adapter keeps no un-gated batch helper. DB-free;
+ffprobe and the gate are faked, nothing is dialled.
 """
 
 from __future__ import annotations
@@ -17,11 +18,13 @@ from types import SimpleNamespace
 import pytest
 
 from app.adapters import rtsp
+from app.adapters.base import SourceCamera
 from app.adapters.sentinel_portal import PortalConfig, SentinelPortalAdapter
 from app.api import settings as settings_api
 from app.schemas.admin import CatalogueTestRequest
 from app.services import mediamtx_client as mc
-from app.services.sentinel_catalogue import StreamConfig
+from app.services import sentinel_import as si
+from app.services.sentinel_catalogue import StreamConfig, build_rtsp_url
 
 SECRET = "s3cret-pass"
 HOST = "198.51.100.7"  # TEST-NET-2: never the organiser, even if a fake were missing
@@ -129,6 +132,17 @@ def test_repeated_test_probes_are_spaced_by_the_gate(monkeypatch: pytest.MonkeyP
     assert asyncio.run(main()) == [True, True, True]
     assert len(dialled_at) == 3
     assert all(b - a >= spacing * 0.9 for a, b in pairwise(dialled_at)), dialled_at
+
+
+def test_import_dials_the_real_adapter_probe_once_per_gate_pass(events: list[str]) -> None:
+    """The import (`probe_catalogue` with its default, shared gate) drives the real adapter's
+    `probe`: exactly one gate pass right before every dial, never none and never two (the raw
+    `probe` must not pass the gate a second time, which would halve the import's dial rate)."""
+    ids = ("cam01", "cam02", "cam03")
+    cams = [SourceCamera(external_id=c, name=c, rtsp_url=build_rtsp_url(STREAM, c)) for c in ids]
+    res = asyncio.run(si.probe_catalogue(cams, _adapter().probe, parallel=1))
+    assert res.probed == 3 and [r["ok"] for r in res.rows] == [True, True, True]
+    assert events == ["gate", "dial cam01", "gate", "dial cam02", "gate", "dial cam03"]
 
 
 def test_adapter_has_no_unpaced_batch_probe() -> None:
