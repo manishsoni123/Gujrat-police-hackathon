@@ -11,11 +11,14 @@ Catalogue modes (CONTRACT Amendments 2026-09-05):
 
 Stream URLs are built from the `sandbox.*` settings (`rtsp://<email>:<access_password>@<host>:8554/stream/<id>`);
 the password never appears in logs, responses or audit rows (`serializers.mask_url` / `mask_secrets_in_text`).
+
+Every stream probe passes the process-wide `dial_gate` (one new upstream connection per 3 s, shared
+with the relay and the health poller) right before it dials: the import through
+`sentinel_import.probe_paced`, Settings → Catalogue → Test through `probe_one`.
 """
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 import re
@@ -32,12 +35,14 @@ from app.adapters.rtsp import ffprobe_details
 from app.core.config import settings as env
 from app.core.urlguard import check_outbound_url
 from app.services import settings_service as cfg
+from app.services.mediamtx_client import dial_gate
 from app.services.sandbox_catalogue import CatalogueError
 from app.services.sentinel_catalogue import (
     CatalogueEntry,
     CatalogueParseError,
     EnrichmentTable,
     StreamConfig,
+    build_rtsp_url,
     merge_catalogue,
     parse_cameras_json,
     parse_enrichment_csv,
@@ -346,29 +351,23 @@ class SentinelPortalAdapter(CameraSourceAdapter):
         return camera.rtsp_url
 
     async def probe(self, camera: SourceCamera) -> ProbeResult:
+        """One ffprobe dial of `camera`. It does not pass the DialGate itself, so it must only be
+        called right after a gate pass: `sentinel_import.probe_paced` passes `dial_gate` before
+        each dial of the import, `probe_one` before the Settings test."""
         if not camera.rtsp_url:
             return ProbeResult(False, error="no rtsp_url (stream credentials not configured)")
         return await ffprobe_details(camera.rtsp_url, timeout_s=self.probe_timeout_s, secrets=self.secrets)
 
-    async def probe_all(self, cameras: list[SourceCamera]) -> dict[str, ProbeResult]:
-        """Probe every camera with at most `probe_parallel` ffprobes at once ("pace your load": each client
-        gets its own copy of the stream, so only the cameras being processed are opened, briefly)."""
-        sem = asyncio.Semaphore(self.probe_parallel)
-        results: dict[str, ProbeResult] = {}
-
-        async def one(c: SourceCamera) -> None:
-            async with sem:
-                results[c.external_id] = await self.probe(c)
-
-        await asyncio.gather(*(one(c) for c in cameras))
-        return results
-
     async def probe_one(self, camera_id: str) -> ProbeResult:
-        """Probe a single sandbox id (Settings → Test) with the current credentials."""
-        cam = SourceCamera(external_id=camera_id, name=camera_id)
-        from app.services.sentinel_catalogue import build_rtsp_url
-
+        """Probe a single sandbox id (Settings → Test) with the current credentials. The dial
+        waits on the shared `dial_gate` like every other upstream dial, so repeated Test clicks,
+        or a Test during an import or a relay switch, queue behind the dials already spaced.
+        Nothing is dialled, and no gate slot is taken, while the credentials are incomplete."""
         if not self.stream.configured:
             return ProbeResult(False, error="stream host, e-mail and access password must all be set")
-        cam.rtsp_url = build_rtsp_url(self.stream, camera_id)
+        cam = SourceCamera(
+            external_id=camera_id, name=camera_id,
+            rtsp_url=build_rtsp_url(self.stream, camera_id),
+        )
+        await dial_gate.wait()
         return await self.probe(cam)
