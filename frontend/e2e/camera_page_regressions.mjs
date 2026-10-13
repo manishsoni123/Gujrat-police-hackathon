@@ -15,6 +15,8 @@
  *   f15-hls     no detection canvas over HLS playback; the toggle tooltip says boxes need WebRTC
  *   f18-cadence at ~0.7 fps overlay frames the boxes stay fully opaque between updates and still
  *               disappear once frames stop
+ *   f18-remount the cadence seen while the canvas was unmounted (boxes toggled off; also the state
+ *               after a WebRTC reconnect) applies to the first frame drawn after it mounts again
  *   f16-hook    useReadsSocket starts empty when its camera id changes
  *   f16-filter  /ws/reads envelopes that belong to another camera are ignored
  *   f16-nav     in-app navigation camera 1 → camera 9 shows none of camera 1's live reads / snapshot
@@ -44,6 +46,15 @@ const record = (key, ok, detail) => {
 /** Runs in the page before the app: fetch/WebSocket recording plus the fake media path. */
 function initHarness(opts) {
   window.__sg = { sockets: [], calls: [], whepDeletes: [], fail: null };
+  /** Highest alpha of any detection-canvas pixel (0 = nothing drawn, -1 = no canvas). */
+  window.__sg.alpha = () => {
+    const c = document.querySelector('canvas.sg-player-detections');
+    if (!c || !c.width) return -1;
+    const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let m = 0;
+    for (let i = 3; i < px.length; i += 4) if (px[i] > m) m = px[i];
+    return m;
+  };
   const nativeFetch = window.fetch.bind(window);
   let inner = nativeFetch;
   const wrapped = async (input, init) => {
@@ -223,14 +234,7 @@ async function checkWhepAndCadence(browser) {
       const sample = await page.evaluate(async ([cid, f]) => {
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         const sock = window.__sg.sockets.filter((x) => x.url.endsWith(`/ws/reads/${cid}`) && x.readyState === 1).at(-1);
-        const alpha = () => {
-          const c = document.querySelector('canvas.sg-player-detections');
-          if (!c || !c.width) return -1;
-          const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-          let m = 0;
-          for (let i = 3; i < px.length; i += 4) if (px[i] > m) m = px[i];
-          return m;
-        };
+        const alpha = window.__sg.alpha;
         for (let k = 0; k < 4; k += 1) {
           sock.emit('overlay', f);
           await sleep(1430);
@@ -247,6 +251,40 @@ async function checkWhepAndCadence(browser) {
       const ok = sample.at1300 >= 250 && sample.at1700 >= 250 && sample.at5000 === 0;
       record('f18-cadence', ok, `max canvas alpha at 1.3 s=${sample.at1300}, 1.7 s=${sample.at1700} (want ≥250), 5 s after the last frame=${sample.at5000} (want 0)`);
     }
+  } finally {
+    await context.close();
+  }
+}
+
+async function checkCadenceAcrossRemount(browser) {
+  const { context, page } = await openPage(browser, { whep: true });
+  try {
+    await openCamera(page, ANPR_CAM, 'Sachivalaya Gate 1');
+    await page.waitForFunction(() => (document.querySelector('.sg-player-caption')?.textContent ?? '').includes('WebRTC'), null, { timeout: 30_000 });
+    await page.waitForSelector('canvas.sg-player-detections', { timeout: 10_000 });
+    const sample = await page.evaluate(async ([cid, f]) => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const sock = window.__sg.sockets.filter((x) => x.url.endsWith(`/ws/reads/${cid}`) && x.readyState === 1).at(-1);
+      const toggle = () => document.querySelector('button[aria-label="Detection boxes"]').click();
+      toggle(); // boxes off: the canvas unmounts while frames keep arriving at ≈ 0.7 fps
+      await sleep(300);
+      const unmounted = !document.querySelector('canvas.sg-player-detections');
+      for (let k = 0; k < 4; k += 1) {
+        sock.emit('overlay', f);
+        await sleep(k < 3 ? 1430 : 300);
+      }
+      toggle(); // boxes on again, between two frames
+      await sleep(1130);
+      const remounted = Boolean(document.querySelector('canvas.sg-player-detections'));
+      sock.emit('overlay', f); // first frame the new canvas draws
+      await sleep(1300);
+      const at1300 = window.__sg.alpha();
+      await sleep(400);
+      const at1700 = window.__sg.alpha();
+      return { unmounted, remounted, at1300, at1700 };
+    }, [ANPR_CAM, OVERLAY_FRAME(ANPR_CAM)]);
+    const ok = sample.unmounted && sample.remounted && sample.at1300 >= 250 && sample.at1700 >= 250;
+    record('f18-remount', ok, `canvas unmounted while off=${sample.unmounted}, mounted again=${sample.remounted}; first frame after the remount: max canvas alpha at 1.3 s=${sample.at1300}, 1.7 s=${sample.at1700} (want ≥250)`);
   } finally {
     await context.close();
   }
@@ -382,9 +420,13 @@ async function checkRefetchFailure(browser, key, status) {
       window.__sg.fail = { path: p, status: st, code: st === 404 ? 'not_found' : 'internal_error', detail: st === 404 ? 'Camera not found' : 'Internal server error' };
       window.__sg.failFrom = Date.now();
     }, [path, status]);
-    // First failing poll (≤ 30 s) plus the client's retries of a 5xx (1 s + 2 s).
+    // First failing poll (≤ 30 s), then the page's verdict: ErrorState or the refresh warning, which a 5xx
+    // reaches only after the client's two retries (1 s + 2 s).
     await page.waitForFunction((p) => window.__sg.calls.some((c) => c.path === p && c.at >= window.__sg.failFrom), path, { timeout: POLL_MS + 10_000 });
-    await settle(status >= 500 ? 5000 : 1500);
+    await page
+      .waitForFunction(() => Boolean(document.querySelector('.ant-alert-error')) || document.body.innerText.includes('Could not refresh this camera'), null, { timeout: 15_000 })
+      .catch(() => undefined);
+    await settle(1000);
     const state = async () =>
       page.evaluate(() => ({
         errorState: Boolean(document.querySelector('.ant-alert-error')),
@@ -438,6 +480,7 @@ async function main() {
   jobs.push(
     (async () => {
       if (want('f15-whep') || want('f18-cadence')) await guard('f15-whep/f18-cadence', () => checkWhepAndCadence(browser));
+      if (want('f18-remount')) await guard('f18-remount', () => checkCadenceAcrossRemount(browser));
       if (want('f15-hls')) await guard('f15-hls', () => checkHls(browser));
       if (want('f16-hook')) await guard('f16-hook', () => checkHookReset(browser));
       if (want('f16-filter')) await guard('f16-filter', () => checkFilter(browser));

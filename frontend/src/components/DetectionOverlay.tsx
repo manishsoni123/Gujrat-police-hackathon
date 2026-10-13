@@ -8,19 +8,20 @@
  * about one every 1.4 s on the 8-camera CPU worker (0.2-2 fps measured). A frame therefore stays up for
  * STALE_INTERVALS observed inter-frame intervals (at least MIN_STALE_MS, at most MAX_STALE_MS) and fades
  * only in the last part of that window, so boxes hold steady between updates at any cadence and still
- * disappear soon after frames stop.
+ * disappear soon after frames stop. The cadence comes from the overlay bus, which measures it from the
+ * camera's socket even while this canvas is unmounted, so the first frame after a (re)mount already
+ * gets the right window.
  */
 import { useEffect, useRef, type RefObject } from 'react';
 import type { WsOverlay, WsOverlayBox } from '@/api/types';
-import { subscribeOverlay } from '@/ws/overlayBus';
+import { OUTAGE_GAP_MS, overlayCadenceMs, subscribeOverlay } from '@/ws/overlayBus';
 
 const MIN_STALE_MS = 1500;
-const MAX_STALE_MS = 8000;
+/** Longer gaps are outages, not the cadence (overlay bus), so no frame outlives one. */
+const MAX_STALE_MS = OUTAGE_GAP_MS;
 const STALE_INTERVALS = 2.5;
 /** Full opacity for this share of the stale window, then a linear fade to 0. */
 const FADE_FROM = 0.6;
-/** Weight of the newest inter-frame interval in the cadence average. */
-const CADENCE_WEIGHT = 0.3;
 const REDRAW_MS = 250;
 const PLATE_COLOUR = '#FACC15';
 const OBJECT_COLOUR: Record<string, string> = {
@@ -35,15 +36,6 @@ const OBJECT_COLOUR: Record<string, string> = {
 interface Props {
   cameraId: number;
   videoRef: RefObject<HTMLVideoElement>;
-}
-
-/**
- * Average inter-frame interval after a new arrival `gapMs` after the previous one. A gap longer than
- * MAX_STALE_MS is an outage (socket reconnect, worker restart), not the cadence, and is left out.
- */
-function nextCadence(avgMs: number | null, gapMs: number): number | null {
-  if (!(gapMs > 0) || gapMs > MAX_STALE_MS) return avgMs;
-  return avgMs === null ? gapMs : avgMs + CADENCE_WEIGHT * (gapMs - avgMs);
 }
 
 /** How long a frame stays on screen without a newer one, for the observed cadence. */
@@ -63,7 +55,6 @@ export function DetectionOverlay({ cameraId, videoRef }: Props) {
 
   useEffect(() => {
     let latest: { frame: WsOverlay; at: number } | null = null;
-    let cadenceMs: number | null = null;
 
     const draw = () => {
       const canvas = canvasRef.current;
@@ -81,7 +72,7 @@ export function DetectionOverlay({ cameraId, videoRef }: Props) {
       ctx.clearRect(0, 0, cw, ch);
       if (!latest) return;
       const age = performance.now() - latest.at;
-      const stale = staleWindow(cadenceMs);
+      const stale = staleWindow(overlayCadenceMs(cameraId));
       if (age >= stale) {
         latest = null;
         return;
@@ -117,12 +108,8 @@ export function DetectionOverlay({ cameraId, videoRef }: Props) {
       ctx.globalAlpha = 1;
     };
 
-    let lastArrival: number | null = null;
-    const unsubscribe = subscribeOverlay(cameraId, (frame) => {
-      const now = performance.now();
-      if (lastArrival !== null) cadenceMs = nextCadence(cadenceMs, now - lastArrival);
-      lastArrival = now;
-      latest = { frame, at: now };
+    const unsubscribe = subscribeOverlay(cameraId, (frame, arrivedAt) => {
+      latest = { frame, at: arrivedAt };
       draw();
     });
     const timer = window.setInterval(draw, REDRAW_MS); // fade-out and resize without a new frame
