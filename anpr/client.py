@@ -161,6 +161,10 @@ class Job:
     # Carries reads, sightings or events (alerts, evidence): a full queue drops every other job
     # before it (see ``Sender.submit``).
     essential: bool = False
+    # "Latest wins" key whose pending job this FIFO job makes stale (``live_counts:<camera>``:
+    # every detections batch carries newer live counts). Queuing the job discards that pending
+    # job, which would otherwise be posted after it (see ``Sender.submit``).
+    supersedes: str | None = None
 
 
 class Sender(threading.Thread):
@@ -170,7 +174,8 @@ class Sender(threading.Thread):
     it is full a job that is not ``essential`` is dropped first, see :meth:`submit`). Snapshots,
     heartbeats, the overlay and ``live_counts``-only batches are "latest wins" per key and never
     retried, so a slow API never builds a backlog of stale data; they are posted when the FIFO
-    queue is empty.
+    queue is empty. A FIFO job that ``supersedes`` a latest-wins key discards the job pending
+    under it, because that job would be posted after the FIFO job with older data.
     """
 
     def __init__(self, min_backoff_s: float = 2.0, max_backoff_s: float = 30.0, max_attempts: int = 6,
@@ -197,6 +202,11 @@ class Sender(threading.Thread):
         During an API outage the queue fills up (one job is retried for about a minute at a
         time); counts-only batches must not push the read batches out (13 Oct 2026: 229 batches
         dropped in an 8-minute outage).
+
+        When ``job`` is queued and names a key in ``supersedes``, the "latest wins" job pending
+        under that key is discarded in the same step: it holds older data and, since latest-wins
+        jobs wait for an empty FIFO, would otherwise be posted after ``job`` (a camera's
+        broadcast counts going backwards). A dropped ``job`` supersedes nothing.
         """
         with self._lock:
             dropped: Job | None = None
@@ -210,6 +220,8 @@ class Sender(threading.Thread):
                     del self._fifo[victim]
             if dropped is not job:
                 self._fifo.append(job)
+                if job.supersedes is not None:
+                    self._latest.pop(job.supersedes, None)
             if dropped is not None:
                 self.stats["dropped"] += 1
         if dropped is not None:

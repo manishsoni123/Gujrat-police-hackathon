@@ -82,6 +82,11 @@ OVERLAY_OBJECTS_MAX_AGE_S = 3.0  # object boxes older than this are not drawn (Y
 STATS_LOG_EVERY_S = 30.0
 
 
+def live_counts_key(camera_id: int) -> str:
+    """The sender's "latest wins" key of a camera's live-counts-only batch."""
+    return f"live_counts:{camera_id}"
+
+
 # ---------------------------------------------------------------------------
 # Logging (JSON lines on stdout, per CONTRACT section 1.1)
 # ---------------------------------------------------------------------------
@@ -853,9 +858,12 @@ class Pipeline:
         cid = cam.cfg.id
         # reads / sightings / events (alerts, evidence) outrank count-only batches in a full queue
         essential = bool(payload["reads"] or payload["sightings"] or payload["events"])
+        # this batch carries newer live counts than the camera's pending live-counts-only job,
+        # which the sender would post after it (counts going backwards on the camera page)
+        supersedes = live_counts_key(cid) if "live_counts" in payload else None
         self.sender.submit(Job("detections", cid,
                                lambda: self.client.post_detections(payload, files),
-                               essential=essential))
+                               essential=essential, supersedes=supersedes))
         log.debug("camera %s: batch queued (%d reads, %d sightings, %d counts, %d events)", cid,
                   len(payload["reads"]), len(payload["sightings"]), len(payload["object_counts"]), len(payload["events"]))
 
@@ -863,13 +871,14 @@ class Pipeline:
         """A batch carrying only ``live_counts`` (the running minute: broadcast, never stored).
 
         "Latest wins" per camera and never retried: the newest counts replace an unsent older
-        batch and go out once the FIFO batches are sent. As a FIFO job every
+        batch and go out once the FIFO batches are sent; a detections batch of the camera queued
+        meanwhile discards it (``_flush``: it carries newer counts). As a FIFO job every
         ``LIVE_COUNTS_EVERY_S`` per camera, an API outage filled the sender queue with them and
         the read batches were dropped instead (13 Oct 2026). The payload is unchanged.
         """
         payload, files = self._build_batch(cam, [])
         cid = cam.cfg.id
-        self.sender.submit_latest(f"live_counts:{cid}", Job(
+        self.sender.submit_latest(live_counts_key(cid), Job(
             "live_counts", cid, lambda: self.client.post_detections(payload, files)))
 
     def _flush_tracks(self, cam: CameraWorker) -> None:

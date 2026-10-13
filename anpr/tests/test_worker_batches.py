@@ -5,6 +5,8 @@
   ``plate_raw`` 64) is ever sent - one such read got the whole batch rejected with a 422.
 * ``live_counts``-only batches are "latest wins" without retry, and a full sender queue drops
   jobs without reads / sightings / events first, so an API outage cannot push read batches out.
+  A camera's detections batch (newer live counts) supersedes its pending live-counts-only job,
+  so the broadcast counts never go backwards.
 * Every best shot keeps the frame it was cut from, so a sighting's frame shows the plate at the
   read's ``captured_at`` - not a frame after the vehicle has gone, and not none at all.
 
@@ -239,6 +241,58 @@ def test_fifo_jobs_go_before_latest_wins_jobs():
     assert s.pending() == 2
     run_sender(s)
     assert sent == ["reads", "counts-new"]
+
+
+def live_counts_broadcast(p, camera_id: int) -> list[int]:
+    """The ``car`` live count of every batch the API got for the camera, in posting order."""
+    return [payload["live_counts"]["counts"]["car"] for payload, _files in p.client.posted
+            if payload["camera_id"] == camera_id and "live_counts" in payload]
+
+
+@pytest.mark.parametrize("newer", ["urgent read batch", "minute rollover batch"])
+def test_stale_live_counts_are_never_broadcast_after_a_newer_batch(newer):
+    # review of 8fe441b: the live-counts-only job waited in "latest wins" until the FIFO was
+    # empty, so it was posted AFTER the camera's newer batch: the API broadcast 7 then 5
+    p = make_pipeline()
+    p.sender = Sender()                     # busy elsewhere: nothing drains yet
+    cam = p.cameras[1]
+    cam.counter = FakeCounter()
+    cam.counter.counts = {"car": 5}
+    live_counts_period(p, cam)              # a live-counts-only job (latest wins)
+    cam.counter.counts = {"car": 7}
+    if newer == "urgent read batch":
+        p.voter.add(cand(1, VALID, age_s=3.2))
+        p._tick_time_based(datetime.now(timezone.utc))
+    else:                                   # the finished minute goes out in a periodic batch
+        cam.pending.object_counts.append(
+            {"minute": "2026-10-13T04:16:00.000Z", "class": "car", "count": 5})
+        cam.last_flush_mono -= LIVE_PERIOD
+        p._tick_time_based(datetime.now(timezone.utc))
+    run_sender(p.sender)
+    broadcast = live_counts_broadcast(p, 1)
+    assert broadcast[-1] == 7               # the camera page ends on the newest count
+    assert broadcast == sorted(broadcast)   # and never goes backwards
+    assert broadcast == [7]                 # the superseded job is not sent at all
+
+
+def test_a_queued_batch_supersedes_only_its_own_cameras_pending_live_counts():
+    s = Sender(queue_size=1)
+    sent: list[str] = []
+
+    def job(kind: str, cid: int, name: str, essential: bool = False, **kw) -> Job:
+        return Job(kind, cid, lambda: sent.append(name), essential=essential, **kw)
+
+    s.submit_latest("live_counts:1", job("live_counts", 1, "counts-1-old"))
+    s.submit_latest("live_counts:2", job("live_counts", 2, "counts-2"))
+    s.submit(job("detections", 1, "batch-1", True, supersedes="live_counts:1"))
+    assert s.pending() == 2                 # counts-1-old is gone, camera 2's job stays
+    s.submit_latest("live_counts:1", job("live_counts", 1, "counts-1-new"))
+    # the queue is full of read batches: this counts-only batch is dropped itself, so it is
+    # never sent and supersedes nothing - counts-1-new stays the newest counts that go out
+    s.submit(job("detections", 1, "counts-batch-1", supersedes="live_counts:1"))
+    assert s.stats["dropped"] == 1
+    run_sender(s)
+    assert sent == ["batch-1", "counts-2", "counts-1-new"]
 
 
 # ---- finding 3: each best shot keeps its own frame ---------------------------------------
