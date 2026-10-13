@@ -131,6 +131,12 @@ def test_bad_envelope_still_fails_the_whole_batch(envelope: dict[str, Any]) -> N
         DetectionBatch.model_validate(body)
 
 
+@pytest.mark.parametrize("payload", [[_finding_batch()], "batch", None, 1])
+def test_non_object_payload_still_fails_the_whole_batch(payload: Any) -> None:
+    with pytest.raises(ValidationError):
+        DetectionBatch.model_validate(payload)
+
+
 # ---------------------------------------------------------------- ingest with a fake session
 
 
@@ -207,6 +213,7 @@ def fake_ingest(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(svc.matcher, "process_read", process_read)
     monkeypatch.setattr(svc, "_insert_read_once", insert_read)
     monkeypatch.setattr(svc, "_insert_event_once", insert_event)
+
     def write_file(rel: str, data: bytes) -> tuple[str, int]:
         rec.files.append(rel)
         return "0" * 64, len(data)
@@ -335,6 +342,8 @@ def test_endpoint_answers_200_with_the_long_plate_rejected(
     ]
     assert [r["plate_norm"] for r in fake_ingest.reads] == ["GJ37Z1140"]
     assert "2 item(s) failed the schema" in caplog.text and f"read[0] {TOO_LONG}" in caplog.text
+    # the reason names the field and the rule, never the rejected value itself
+    assert LONG_NORM not in caplog.text and LONG_NORM not in resp.text
 
 
 def test_endpoint_keeps_422_for_a_bad_envelope(
@@ -344,4 +353,14 @@ def test_endpoint_keeps_422_for_a_bad_envelope(
     resp = _post(client, body, {"crop_0": JPEG, "crop_1": JPEG})
     assert resp.status_code == 422
     assert "camera_id" in resp.text
+    assert fake_ingest.reads == []
+
+
+def test_endpoint_still_fails_a_non_object_payload_whole(
+        client: TestClient, fake_ingest: SimpleNamespace) -> None:
+    resp = client.post("/api/internal/detections",
+                       files={"payload": (None, json.dumps([_finding_batch()])),
+                              "crop_1": ("crop_1.jpg", JPEG, "image/jpeg")})
+    assert resp.status_code == 400  # unchanged: `_multipart` answers before any schema runs
+    assert "JSON object" in resp.text
     assert fake_ingest.reads == []
