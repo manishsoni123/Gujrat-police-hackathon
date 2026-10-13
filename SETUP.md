@@ -97,7 +97,7 @@ the NVIDIA Windows driver, not a separate container toolkit.
   `ANPR_PREINDEX_GPU_*`) with the laptop column documented in `deploy/.env.example`; the CPU workers'
   `ANPR_LIVE_MEMORY` / `ANPR_PREINDEX_MEMORY` do not apply to them.
 - **Every** compose command then needs `-f deploy/docker-compose.gpu.yml` as well (the `Makefile`,
-  `deploy/reset-db.sh` and `deploy.sh` add it). Without it `up` recreates MediaMTX without NVENC and every
+  `deploy/reset-db.sh` and `deploy/deploy.sh` add it). Without it `up` recreates MediaMTX without NVENC and every
   H.265 camera goes black.
 - The workers are `anpr-live-gpu` and `anpr-preindex-gpu`. Do not name `anpr-live` / `anpr-preindex` on
   the command line: that starts the CPU twin, which has the same container name.
