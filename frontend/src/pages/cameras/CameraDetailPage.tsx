@@ -12,7 +12,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTool
 import { PageHeader } from '@/components/PageHeader';
 import { StreamPlayer, type ActiveMode } from '@/components/StreamPlayer';
 import { camerasApi, detectionsApi, eventsApi, objectsApi } from '@/api';
-import { errorMessage } from '@/api/client';
+import { ApiError, errorMessage } from '@/api/client';
 import type { Camera, Detection, EventItem } from '@/api/types';
 import { useReadsSocket } from '@/ws/useReadsSocket';
 import { useHealthSocket } from '@/ws/useHealthSocket';
@@ -134,22 +134,40 @@ function readDetectionsPref(): boolean {
   }
 }
 
+/**
+ * 403/404 on the camera re-read: the camera was deleted or moved out of this user's department/district
+ * scope while the page was open. Unlike a transient failure (5xx, network), that ends the page.
+ */
+function accessLost(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 403 || error.status === 404);
+}
+
 export function CameraDetailPage() {
   const { id } = useParams();
-  const cameraId = Number(id);
+  // `/cameras/:id` keeps one route element when only the id changes (Ctrl+K search, back/forward between
+  // two cameras). Keyed by id, every piece of per-camera state (live reads, the player session and its
+  // WebRTC failure count, open Tag event / Edit modals, the "playing via" mode) starts fresh, exactly as
+  // when the page is opened from another page.
+  return <CameraDetail key={id} cameraId={Number(id)} />;
+}
+
+function CameraDetail({ cameraId }: { cameraId: number }) {
   const navigate = useNavigate();
   const canWrite = usePermission('cameras.write');
   const canEvent = usePermission('events.write');
   // An ANPR camera is re-read every 30 s so the ANPR pill follows the worker (reconnecting, queued, worker gone).
+  // The poll stops once the camera answers 403/404 (see `accessLost`); a later success restarts it.
   const cam = useQuery({
     queryKey: ['cameras', 'detail', cameraId],
     queryFn: () => camerasApi.get(cameraId),
     enabled: Number.isFinite(cameraId),
-    refetchInterval: (q) => (q.state.data?.anpr_enabled ? 30_000 : false),
+    refetchInterval: (q) => (q.state.data?.anpr_enabled && !accessLost(q.state.error) ? 30_000 : false),
   });
+  const gone = cam.isError && accessLost(cam.error);
   const seedReads = useQuery({ queryKey: ['detections', 'camera', cameraId, 'seed'], queryFn: () => detectionsApi.list({ camera_id: cameraId, page_size: 30 }), enabled: Number.isFinite(cameraId) });
   const events = useQuery({ queryKey: ['events', 'camera', cameraId], queryFn: () => eventsApi.list({ camera_id: cameraId, page_size: 50 }), enabled: Number.isFinite(cameraId) });
-  const ws = useReadsSocket(Number.isFinite(cameraId) ? cameraId : null);
+  // The live read channel closes with the page when access is lost (it was authorised at connect time).
+  const ws = useReadsSocket(Number.isFinite(cameraId) ? cameraId : null, !gone);
   const [offline, setOffline] = useState(false);
   const [mode, setMode] = useState<ActiveMode | null>(null);
   const [eventOpen, setEventOpen] = useState(false);
@@ -187,10 +205,15 @@ export function CameraDetailPage() {
 
   if (cam.isLoading) return <PageSkeleton cards={2} />;
   const c = cam.data;
-  // Full-page error only when nothing has loaded. A failed background re-read (30 s ANPR poll, health
-  // invalidation) keeps `data` but flips `isError`: replacing the page then would unmount the stream
-  // (WHEP re-dial) and an open edit modal (unsaved edits lost), so keep the last good camera on screen.
-  if (!c) return cam.isError ? <ErrorState error={cam.error} onRetry={() => void cam.refetch()} /> : null;
+  // Full-page error when nothing has loaded, or when the camera is gone for this user (403/404): that
+  // unmounts the player (its WebRTC session is closed) and ends the page. Any other failed background
+  // re-read (30 s ANPR poll, health invalidation) keeps `data` but flips `isError`: replacing the page then
+  // would unmount the stream (WHEP re-dial) and an open edit modal (unsaved edits lost), so the last good
+  // camera stays on screen under a warning.
+  if (!c || gone) {
+    if (!cam.isError) return null;
+    return <ErrorState title={c ? 'This camera is no longer available' : undefined} error={cam.error} onRetry={() => void cam.refetch()} />;
+  }
 
   return (
     <div>
