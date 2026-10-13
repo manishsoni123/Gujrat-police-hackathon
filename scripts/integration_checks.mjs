@@ -455,7 +455,13 @@ async function phaseB() {
   const rt = await req('GET', '/api/vehicles/GJ01AB1234/route', { token: A });
   const r = rt.data ?? {};
   const ordered = (r.sightings ?? []).every((s, i, arr) => i === 0 || arr[i - 1].first_seen <= s.first_seen);
-  check('route ordered sightings + polyline + legs flagged', rt.status === 200 && (r.sightings ?? []).length >= 3 && ordered && r.polyline.length === r.sightings.length && (r.legs ?? []).length >= 2 && r.legs.filter((l) => l.distance_km > 0.5).every((l) => l.flags.includes('implausible_speed')) && r.total_distance_km > 0, `stops=${r.sightings?.length} cams=${r.cameras_count} km=${r.total_distance_km} loops=${r.loop_resets_in_window} seq=${r.sightings?.map((s) => s.camera?.external_id).join('>')}`);
+  // Legs are flagged by speed, not by distance: on the synthetic loop cam 1 (5 s) -> cam 6 (50 s) is a plausible
+  // 1.4 km in 45 s (~115 km/h), every other hop is a teleport. A leg over 0.5 km is flagged iff it is faster than
+  // route.speed_flag_kmh, and the looping footage must produce at least one flagged leg.
+  const flagKmh = Number((await req('GET', '/api/settings', { token: A })).data?.items?.find((i) => i.key === 'route.speed_flag_kmh')?.value ?? 150);
+  const longLegs = (r.legs ?? []).filter((l) => l.distance_km > 0.5);
+  const flagsMatchSpeed = longLegs.every((l) => l.flags.includes('implausible_speed') === (l.speed_kmh > flagKmh)) && longLegs.some((l) => l.flags.includes('implausible_speed'));
+  check('route ordered sightings + polyline + legs flagged', rt.status === 200 && (r.sightings ?? []).length >= 3 && ordered && r.polyline.length === r.sightings.length && (r.legs ?? []).length >= 2 && flagsMatchSpeed && r.total_distance_km > 0, `flag>${flagKmh} km/h stops=${r.sightings?.length} cams=${r.cameras_count} km=${r.total_distance_km} loops=${r.loop_resets_in_window} seq=${r.sightings?.map((s) => s.camera?.external_id).join('>')}`);
   // Two systems on one route: GJ01AB1234 is one of the two plates the own-gate loop shares with sandbox cameras 1-3
   // (CONTRACT §12.4 amendment); the pre-index worker reads the own gate (Ahmedabad, ~25 km from Gandhinagar).
   const seqExt = (r.sightings ?? []).map((s) => s.camera?.external_id);
