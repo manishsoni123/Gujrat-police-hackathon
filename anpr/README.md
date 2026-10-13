@@ -210,9 +210,10 @@ yields 5–10 OCR calls and one voted read per 3 s window – sufficient for the
 - PaddleOCR ships no PP-OCRv4 **English detection** model; the English det model is PP-OCRv3
   (recognition is PP-OCRv4). Models are fetched at build time into `/root/.paddleocr/whl/`.
 - Route legs on the 90 s synthetic loop are flagged `implausible_speed` by the API whenever they are faster
-  than `route.speed_flag_kmh` (default 150 km/h) – that is almost every leg, and expected. The cam 1 → cam 6
-  hop of `GJ01AB1234` (1.43 km in about 45 s, ≈ 115 km/h) is plausible and stays unflagged since camera 6
-  reads the plate (tiled-merge fix, 13 Oct).
+  than `route.speed_flag_kmh` (default 150 km/h) – that is almost every leg, and expected. A leg that skips a
+  stop whose read was missed in that loop can be slower and stays unflagged, e.g. the cam 1 → cam 6 hop of
+  `GJ01AB1234` seen on 13 Oct (1.43 km in about 45 s, ≈ 115 km/h, no cam 3 or own-gate read between them)
+  or cam 1 → cam 2 (1.97 km in about 67 s) when cams 3 and 6 are both missed.
 - **Voted `plate_norm` vs `plate_raw` (fixed 5 Sept).** The read's `plate_raw` used to be the best member's raw OCR even when the vote had out-voted it; the API re-normalises `plate_raw` and overrode the vote, so a corrected mis-read (`GJ 01 AB 1284` voted to `GJ01AB1234`) was stored under the wrong plate while its sighting carried the voted one. `voting.raw_for_vote` now takes the raw string of a member that agrees with the vote; `test_voting.py` asserts `normalise(read.plate_raw).plate_norm == read.plate_norm` for every emitted read.
 - The container runs as uid 10001 (`USER anpr`), writes nothing at run time and works with `read_only: true` + `tmpfs: /tmp`; `docker exec sentinel-anpr-live id` must not print `uid=0`.
 - **RTSP end-of-stream is a reconnect, not a stop.** A clean ffmpeg EOF only stops *file* sources;
