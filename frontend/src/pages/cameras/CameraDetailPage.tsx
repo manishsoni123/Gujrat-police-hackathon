@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Badge, Button, Card, Descriptions, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import { EditOutlined, ReloadOutlined, TagOutlined, UnorderedListOutlined, WifiOutlined } from '@ant-design/icons';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
@@ -138,7 +138,7 @@ function readDetectionsPref(): boolean {
  * 403/404 on the camera re-read: the camera was deleted or moved out of this user's department/district
  * scope while the page was open. Unlike a transient failure (5xx, network), that ends the page.
  */
-function accessLost(error: unknown): boolean {
+function accessLost(error: unknown): error is ApiError {
   return error instanceof ApiError && (error.status === 403 || error.status === 404);
 }
 
@@ -155,11 +155,28 @@ function CameraDetail({ cameraId }: { cameraId: number }) {
   const navigate = useNavigate();
   const canWrite = usePermission('cameras.write');
   const canEvent = usePermission('events.write');
+  const queryClient = useQueryClient();
+  const camKey = ['cameras', 'detail', cameraId];
   // An ANPR camera is re-read every 30 s so the ANPR pill follows the worker (reconnecting, queued, worker gone).
   // The poll stops once the camera answers 403/404 (see `accessLost`); a later success restarts it.
+  //
+  // Lost access is latched in the query's own error: after a 403/404, a re-read that fails for a reason
+  // that says nothing about access (5xx, a proxy 502 or a network error while the API restarts) rethrows
+  // that 403/404, from whichever refetch it comes (a /ws/health invalidation of ['cameras'], Retry). So
+  // `gone` below, the stopped poll and the closed read channel all hold until a re-read succeeds, instead
+  // of the stale camera and its player coming back under the refresh warning. Kept in the query state
+  // rather than in render-time state, so it also holds when React renders only the last of several query
+  // updates (a background tab).
   const cam = useQuery({
-    queryKey: ['cameras', 'detail', cameraId],
-    queryFn: () => camerasApi.get(cameraId),
+    queryKey: camKey,
+    queryFn: async () => {
+      try {
+        return await camerasApi.get(cameraId);
+      } catch (e) {
+        const prev = queryClient.getQueryState(camKey)?.error;
+        throw !accessLost(e) && accessLost(prev) ? prev : e;
+      }
+    },
     enabled: Number.isFinite(cameraId),
     refetchInterval: (q) => (q.state.data?.anpr_enabled && !accessLost(q.state.error) ? 30_000 : false),
   });
@@ -205,11 +222,11 @@ function CameraDetail({ cameraId }: { cameraId: number }) {
 
   if (cam.isLoading) return <PageSkeleton cards={2} />;
   const c = cam.data;
-  // Full-page error when nothing has loaded, or when the camera is gone for this user (403/404): that
-  // unmounts the player (its WebRTC session is closed) and ends the page. Any other failed background
-  // re-read (30 s ANPR poll, health invalidation) keeps `data` but flips `isError`: replacing the page then
-  // would unmount the stream (WHEP re-dial) and an open edit modal (unsaved edits lost), so the last good
-  // camera stays on screen under a warning.
+  // Full-page error when nothing has loaded, or when the camera is gone for this user (403/404, held until
+  // a re-read succeeds): that unmounts the player (its WebRTC session is closed) and ends the page. Any
+  // other failed background re-read (30 s ANPR poll, health invalidation) keeps `data` but flips `isError`:
+  // replacing the page then would unmount the stream (WHEP re-dial) and an open edit modal (unsaved edits
+  // lost), so the last good camera stays on screen under a warning.
   if (!c || gone) {
     if (!cam.isError) return null;
     return <ErrorState title={c ? 'This camera is no longer available' : undefined} error={cam.error} onRetry={() => void cam.refetch()} />;

@@ -23,6 +23,9 @@
  *   f17-404     a 404 on the 30 s camera re-read ends the page (ErrorState, player gone and its WebRTC
  *               session DELETEd, poll stopped); Retry once access is back restores it
  *   f17-500     a 500 keeps the last loaded camera and the playing session, and the poll continues
+ *   f17-latch   once a 404 has ended the page, later transient failures of the re-read (a Caddy 502 on
+ *               Retry, a network error on the refetch a /ws/health event triggers) keep it ended: no
+ *               player, no /ws/reads socket, no 30 s poll; only a successful re-read restores it
  */
 import { chromium } from 'playwright';
 
@@ -66,6 +69,8 @@ function initHarness(opts) {
       window.__sg.calls.push({ path: p, at: Date.now() });
       const f = window.__sg.fail;
       if (f && f.path === p) {
+        if (f.network) throw new TypeError('Failed to fetch'); // API down: the client reports status 0
+        if (f.emptyBody) return new Response('', { status: f.status }); // proxy error page (Caddy 502)
         return new Response(JSON.stringify({ detail: f.detail, code: f.code }), { status: f.status, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -392,10 +397,13 @@ async function checkNavigation(browser) {
     await emit(page, ANPR_CAM, 'snapshot', { camera_id: ANPR_CAM, url: 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22/%3E#cam1-snapshot', updated_at: new Date().toISOString() });
     await settle(300);
     const shownOnA = (await pageText(page)).includes('GJ99ZZ0001');
-    // In-app navigation (what Ctrl+K search and back/forward do): the route element is reused.
-    await page.evaluate(async (to) => {
-      const { router } = await import('/src/router.tsx');
-      await router.navigate(to);
+    // In-app navigation (what Ctrl+K search and back/forward do): the route element is reused. Done as a
+    // history traversal the app's own router handles; `import('/src/router.tsx')` would hand back a second
+    // router instance once Vite has hot-updated any page module (the app then imports it as `?t=…`).
+    await page.evaluate((to) => {
+      const idx = (window.history.state?.idx ?? 0) + 1;
+      window.history.pushState({ usr: null, key: 'e2e-nav', idx }, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
     }, `/cameras/${PLAIN_CAM}`);
     await page.getByRole('heading', { name: PLAIN_CAM_NAME }).first().waitFor({ timeout: 30_000 });
     await settle(600); // well inside camera 9's first snapshot push (≥ 2 s after its socket opens)
@@ -464,6 +472,103 @@ async function checkRefetchFailure(browser, key, status) {
   }
 }
 
+/**
+ * A 404 ends the page; transient failures after it must not bring it back. Each refetch is triggered the
+ * way it happens in production: a `/ws/health` event (useHealthSocket invalidates ['cameras'] on every
+ * camera's health change) or the ErrorState's Retry button.
+ */
+async function checkAccessLatch(browser) {
+  const { context, page } = await openPage(browser, { whep: true });
+  try {
+    await openCamera(page, ANPR_CAM, 'Sachivalaya Gate 1');
+    await page.waitForSelector('.sg-live-badge', { timeout: 30_000 }); // a WebRTC session is open
+    const path = `/api/cameras/${ANPR_CAM}`;
+    const failWith = (f) =>
+      page.evaluate(([p, x]) => {
+        window.__sg.fail = x ? { path: p, ...x } : null;
+      }, [path, f]);
+    const now = () => page.evaluate(() => Date.now());
+    const callsSince = (t) => page.evaluate(([p, since]) => window.__sg.calls.filter((c) => c.path === p && c.at >= since).length, [path, t]);
+    const waitCall = (t) => page.waitForFunction(([p, since]) => window.__sg.calls.some((c) => c.path === p && c.at >= since), [path, t], { timeout: 15_000 });
+    // A health change of another camera: the page's own `offline` flag stays as it is.
+    const healthEvent = () =>
+      page.evaluate(() => {
+        const s = window.__sg.sockets.filter((x) => x.url.endsWith('/ws/health') && x.readyState === 1).at(-1);
+        if (!s) throw new Error('no open /ws/health socket');
+        const at = new Date().toISOString();
+        s.emit('health', { camera_id: 2, name: 'other', status: 'online', previous_status: 'degraded', last_seen_at: at, checked_at: at, is_ready: true, has_video: true, bytes_delta: 1000, readers: 1, source_flag: 'ok', maintenance_status: 'ok' });
+      });
+    const state = () =>
+      page.evaluate((cid) => ({
+        errorState: Boolean(document.querySelector('.ant-alert-error')),
+        refreshBanner: document.body.innerText.includes('Could not refresh this camera'),
+        players: document.querySelectorAll('.sg-player').length,
+        readsSockets: window.__sg.sockets.filter((s) => s.url.endsWith(`/ws/reads/${cid}`) && s.readyState === 1).length,
+      }), ANPR_CAM);
+    const ended = (s) => s.errorState && !s.refreshBanner && s.players === 0 && s.readsSockets === 0;
+    const show = (s) => `ErrorState=${s.errorState} banner=${s.refreshBanner} players=${s.players} /ws/reads=${s.readsSockets}`;
+    // Wait out the client's two retries of a 5xx / network error (1 s + 2 s) before judging the page.
+    const RETRIES_MS = 4500;
+
+    // 1. Access lost: a health-triggered re-read answers 404.
+    await failWith({ status: 404, code: 'not_found', detail: 'Camera not found' });
+    let t = await now();
+    await healthEvent();
+    await waitCall(t);
+    await page.waitForSelector('.ant-alert-error', { timeout: 15_000 }).catch(() => undefined);
+    await settle(1000);
+    const afterLoss = await state();
+
+    // 2. The API restarts: Retry hits Caddy's 502.
+    await failWith({ status: 502, emptyBody: true });
+    t = await now();
+    await page.getByRole('button', { name: 'Retry' }).first().click({ timeout: 5000 }).catch(() => undefined);
+    await waitCall(t).catch(() => undefined);
+    await settle(RETRIES_MS);
+    const after502 = await state();
+
+    // 3. Still down: the next health event's refetch gets no answer at all (status 0).
+    await failWith({ network: true });
+    t = await now();
+    await healthEvent();
+    await waitCall(t).catch(() => undefined);
+    await settle(RETRIES_MS);
+    const afterNetwork = await state();
+
+    // 4. No 30 s poll restarts while the camera is gone.
+    t = await now();
+    await settle(POLL_MS + 5000);
+    const polls = await callsSince(t);
+    const afterWait = await state();
+
+    // 5. Access comes back: Retry restores the page, its live player and the read channel.
+    await failWith(null);
+    t = await now();
+    await page.getByRole('button', { name: 'Retry' }).first().click({ timeout: 5000 }).catch(() => undefined);
+    await waitCall(t).catch(() => undefined);
+    await page
+      .waitForFunction(() => !document.querySelector('.ant-alert-error') && !document.body.innerText.includes('Could not refresh this camera'), null, { timeout: 15_000 })
+      .catch(() => undefined);
+    const restored = await page
+      .waitForSelector('.sg-live-badge', { timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false);
+    await page
+      .waitForFunction((cid) => window.__sg.sockets.some((s) => s.url.endsWith(`/ws/reads/${cid}`) && s.readyState === 1), ANPR_CAM, { timeout: 10_000 })
+      .catch(() => undefined);
+    const afterRestore = await state();
+
+    const ok = ended(afterLoss) && ended(after502) && ended(afterNetwork) && ended(afterWait) && polls === 0 && restored && afterRestore.players === 1 && afterRestore.readsSockets === 1 && !afterRestore.errorState && !afterRestore.refreshBanner;
+    record(
+      'f17-latch',
+      ok,
+      `after the 404: ${show(afterLoss)}; after Retry → 502: ${show(after502)}; after health refetch → network error: ${show(afterNetwork)} (each want ErrorState=true banner=false players=0 /ws/reads=0); camera re-reads in the next ${(POLL_MS + 5000) / 1000} s=${polls} (want 0), then ${show(afterWait)}; Retry after access returns: live player=${restored}, ${show(afterRestore)} (want ErrorState=false banner=false players=1 /ws/reads=1)`,
+    );
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({ ...(CHANNEL ? { channel: CHANNEL } : {}), args: ['--no-proxy-server', '--autoplay-policy=no-user-gesture-required'] });
   const want = (k) => !ONLY || ONLY.has(k);
@@ -477,6 +582,7 @@ async function main() {
   const jobs = [];
   if (want('f17-404')) jobs.push(guard('f17-404', () => checkRefetchFailure(browser, 'f17-404', 404)));
   if (want('f17-500')) jobs.push(guard('f17-500', () => checkRefetchFailure(browser, 'f17-500', 500)));
+  if (want('f17-latch')) jobs.push(guard('f17-latch', () => checkAccessLatch(browser)));
   jobs.push(
     (async () => {
       if (want('f15-whep') || want('f18-cadence')) await guard('f15-whep/f18-cadence', () => checkWhepAndCadence(browser));
