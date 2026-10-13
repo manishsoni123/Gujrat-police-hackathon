@@ -68,6 +68,12 @@ FRAME_MAX_BYTES = 400_000
 FRAME_JPEG_WIDTH = 960          # CONTRACT section 7.2: sighting frames are 960 px wide (frames may be decoded natively)
 SNAPSHOT_MAX_BYTES = 150_000
 MIN_OCR_CHARS = 6
+# The longest registration is 11 characters (CONTRACT 3.4 standard pattern: 2 state letters,
+# 2 district digits, 3 series letters, 4 digits, e.g. DL10CAB1234); a longer OCR string is a plate
+# read together with the burnt-in caption or a signboard line beside it.
+MAX_OCR_CHARS = 11
+API_PLATE_NORM_MAX = 16          # /internal/detections schema: reads[] / sightings[] plate_norm
+API_PLATE_RAW_MAX = 64           # reads[].plate_raw; one longer item gets the whole batch a 422
 EDGE_MARGIN_PX = 2
 LIVE_COUNTS_EVERY_S = 5.0
 OVERLAY_OBJECTS_MAX_AGE_S = 3.0  # object boxes older than this are not drawn (YOLOX runs every OBJECT_EVERY_N frames)
@@ -169,6 +175,7 @@ class CameraWorker:
         self.evidence_files = 0
         self.ocr_calls = 0
         self.no_digit_reads = 0           # OCR strings without a digit (signboards / captions), dropped before voting
+        self.too_long_reads = 0           # longer than any registration (plate + caption): dropped
         self.invalid_minute: tuple[int, int] = (0, 0)      # (minute bucket, invalid-format reads posted in it)
         self.invalid_suppressed = 0
         self.counter: ObjectCounter | None = None
@@ -196,6 +203,7 @@ class CameraWorker:
             "osd_regions_now": len(self.osd.regions),
             "invalid_capped": int(self.invalid_suppressed),
             "no_digit": int(self.no_digit_reads),
+            "too_long": int(self.too_long_reads),
         }
 
     def vehicle_stats(self) -> dict[str, int]:
@@ -493,10 +501,18 @@ class Pipeline:
             if track is not None:
                 track.text_only += 1
             return None
+        plate_raw = result.raw.replace("\n", " ")
+        if len(norm.plate_norm) > MAX_OCR_CHARS or len(plate_raw) > API_PLATE_RAW_MAX:
+            # A two-line plate next to the burnt-in caption is read with the caption as a third
+            # line ('GJ37Z1140CAM2SECTOR11GSRTCBUSSTAND', 13 Oct): never a plate, and over the
+            # API's 16 characters it took the batch - with the valid reads in it - down (422).
+            log.debug("camera %s: ignored over-long OCR %r", cam.cfg.id, result.raw)
+            cam.too_long_reads += 1
+            return None
         conf = float(result.confidence) * (1.0 if box.source == "contour" else min(1.0, 0.5 + box.confidence / 2))
         cand = Candidate(
             camera_id=cam.cfg.id, captured_at=captured_at, stream_pts=stream_pts, frame_index=frame_index,
-            plate_raw=result.raw.replace("\n", " "), plate_norm=norm.plate_norm, is_valid_format=norm.is_valid_format,
+            plate_raw=plate_raw, plate_norm=norm.plate_norm, is_valid_format=norm.is_valid_format,
             confidence=conf, bbox=(box.x, box.y, box.w, box.h), crop_jpeg=self._crop_jpeg(crop), frame=frame,
         )
         self.voter.add(cand)
@@ -504,24 +520,25 @@ class Pipeline:
                   result.backend, box.w)
         return norm.plate_norm
 
-    def _ocr_track(self, cam: CameraWorker, t: Track, frame: Frame | None) -> None:
+    def _ocr_track(self, cam: CameraWorker, t: Track) -> None:
         """OCR the best shots of a track (largest, sharpness-weighted); their reads are voted like frames.
 
-        ``frame`` is the full frame the best shot's sighting is illustrated with; ``None`` when the
-        track is flushed without a current frame (discontinuity / shutdown) - a crop must never be
-        posted as a sighting frame.
+        Every shot's candidate carries the full frame that shot was cut from (``Shot.frame``), so
+        whichever shot wins the vote, the sighting frame shows the plate at the read's
+        ``captured_at`` - not the current frame, which at track end comes ``ANPR_TRACK_GAP_S``
+        after the plate's last box. A crop is never posted as a sighting frame.
         """
         if t.ocr_runs == 0:
             cam.vehicles_ocr += 1
         t.ocr_runs += 1
         t.ocr_width = t.best_width
-        for i, shot in enumerate(t.shots):
-            plate = self._ocr_crop(cam, shot.crop, shot.box, shot.captured_at, shot.stream_pts, shot.frame_index,
-                                   frame.image if (i == 0 and frame is not None) else None, track=t)
+        for shot in t.shots:
+            plate = self._ocr_crop(cam, shot.crop, shot.box, shot.captured_at, shot.stream_pts,
+                                   shot.frame_index, shot.frame, track=t)
             if plate:
                 t.reads.append(plate)
 
-    def _finish_track(self, cam: CameraWorker, t: Track, frame: Frame | None) -> None:
+    def _finish_track(self, cam: CameraWorker, t: Track) -> None:
         """A plate track ended: last OCR chance, then record the detected vehicle (evidence).
 
         A track whose OCR only ever returned letters (``tracks.track_kind`` = ``text``: a signboard or
@@ -529,7 +546,7 @@ class Pipeline:
         and gets no evidence file, so the detected-vehicle counts stay honest.
         """
         if cam.tracker.ready_for_ocr(t, self.settings.ocr_min_w, ended=True):
-            self._ocr_track(cam, t, frame)
+            self._ocr_track(cam, t)
         best = t.best
         if best is None:
             return
@@ -563,9 +580,9 @@ class Pipeline:
         touched, ended = cam.tracker.update(boxes, frame.image, frame.captured_at, frame.stream_pts, frame.frame_index)
         for t in touched:
             if cam.tracker.ready_for_ocr(t, self.settings.ocr_min_w):
-                self._ocr_track(cam, t, frame)
+                self._ocr_track(cam, t)
         for t in ended:
-            self._finish_track(cam, t, frame)
+            self._finish_track(cam, t)
 
     def _ocr_boxes(self, cam: CameraWorker, frame: Frame, boxes: list[Box]) -> None:
         """Per-frame OCR (``ANPR_BEST_SHOT=0``): every box at least ``ANPR_OCR_MIN_W`` wide is read."""
@@ -649,6 +666,13 @@ class Pipeline:
     # ---- voting / sightings ----------------------------------------------------
     def _accept_reads(self, cam: CameraWorker, reads: list[VotedRead]) -> None:
         for read in reads:
+            if len(read.plate_norm) > API_PLATE_NORM_MAX or len(read.plate_raw) > API_PLATE_RAW_MAX:
+                # never reached through _ocr_crop; the API rejects the whole batch for one such read
+                log.warning("camera %s: over-long read %r dropped (API limits %d / %d)", cam.cfg.id,
+                            read.plate_norm[:2 * API_PLATE_NORM_MAX], API_PLATE_NORM_MAX,
+                            API_PLATE_RAW_MAX)
+                cam.too_long_reads += 1
+                continue
             if read.confidence < self.settings.min_read_conf:
                 log.debug("camera %s: %s below ANPR_MIN_READ_CONF (%.2f)", cam.cfg.id, read.plate_norm, read.confidence)
                 continue
@@ -777,7 +801,7 @@ class Pipeline:
                 self._flush(cam, dirty)
             elif cam.counter is not None and mono - cam.last_live_counts_mono >= LIVE_COUNTS_EVERY_S:
                 if cam.counter.live_counts()["counts"]:
-                    self._flush(cam, [])
+                    self._send_live_counts(cam)
                 cam.last_live_counts_mono = mono
 
     # ---- batching ------------------------------------------------------------
@@ -825,16 +849,33 @@ class Pipeline:
         cam.pending = PendingBatch()
         cam.last_live_counts_mono = time.monotonic()
         cid = cam.cfg.id
-        self.sender.submit(Job("detections", cid, lambda: self.client.post_detections(payload, files)))
+        # reads / sightings / events (alerts, evidence) outrank count-only batches in a full queue
+        essential = bool(payload["reads"] or payload["sightings"] or payload["events"])
+        self.sender.submit(Job("detections", cid,
+                               lambda: self.client.post_detections(payload, files),
+                               essential=essential))
         log.debug("camera %s: batch queued (%d reads, %d sightings, %d counts, %d events)", cid,
                   len(payload["reads"]), len(payload["sightings"]), len(payload["object_counts"]), len(payload["events"]))
+
+    def _send_live_counts(self, cam: CameraWorker) -> None:
+        """A batch carrying only ``live_counts`` (the running minute: broadcast, never stored).
+
+        "Latest wins" per camera and never retried: the newest counts replace an unsent older
+        batch and go out once the FIFO batches are sent. As a FIFO job every
+        ``LIVE_COUNTS_EVERY_S`` per camera, an API outage filled the sender queue with them and
+        the read batches were dropped instead (13 Oct 2026). The payload is unchanged.
+        """
+        payload, files = self._build_batch(cam, [])
+        cid = cam.cfg.id
+        self.sender.submit_latest(f"live_counts:{cid}", Job(
+            "live_counts", cid, lambda: self.client.post_detections(payload, files)))
 
     def _flush_tracks(self, cam: CameraWorker) -> None:
         """End every open plate track of a camera (discontinuity, stop): final OCR + vehicle evidence."""
         for t in cam.tracker.flush():
             if t.best is None:
                 continue
-            self._finish_track(cam, t, None)      # no current frame: the read carries no sighting frame
+            self._finish_track(cam, t)            # each read still carries its own shot's frame
 
     def _finish_camera(self, cam: CameraWorker, note: str) -> None:
         """Flush everything a camera still holds (stop / shutdown)."""

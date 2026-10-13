@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -21,6 +21,9 @@ import requests
 log = logging.getLogger("anpr.client")
 
 RETRY_STATUS = {500, 502, 503, 504}
+# Kinds whose content is stale by the next one: posted once, never retried (they are also
+# submitted "latest wins", so a slow or absent API never builds a backlog of them).
+NO_RETRY_KINDS = frozenset({"snapshot", "heartbeat", "overlay", "live_counts"})
 
 
 class ApiError(Exception):
@@ -149,19 +152,25 @@ class ApiClient:
 # ---------------------------------------------------------------------------
 @dataclass
 class Job:
-    kind: str                       # detections | events | object_counts | snapshot | heartbeat | overlay
+    # detections | live_counts | events | object_counts | snapshot | heartbeat | overlay
+    kind: str
     camera_id: int | None
     call: Callable[[], Any]
     attempts: int = 0
     created: float = field(default_factory=time.monotonic)
+    # Carries reads, sightings or events (alerts, evidence): a full queue drops every other job
+    # before it (see ``Sender.submit``).
+    essential: bool = False
 
 
 class Sender(threading.Thread):
     """Serialises all POSTs on one thread so the inference loop never blocks on the network.
 
-    Detection batches, events and object counts are queued FIFO (bounded; the oldest is dropped
-    when full). Snapshots and heartbeats are "latest wins" per key, so a slow API never builds a
-    backlog of stale images.
+    Detection batches, events and object counts are queued FIFO and retried (bounded queue; when
+    it is full a job that is not ``essential`` is dropped first, see :meth:`submit`). Snapshots,
+    heartbeats, the overlay and ``live_counts``-only batches are "latest wins" per key and never
+    retried, so a slow API never builds a backlog of stale data; they are posted when the FIFO
+    queue is empty.
     """
 
     def __init__(self, min_backoff_s: float = 2.0, max_backoff_s: float = 30.0, max_attempts: int = 6,
@@ -170,9 +179,10 @@ class Sender(threading.Thread):
         self.min_backoff_s = min_backoff_s
         self.max_backoff_s = max_backoff_s
         self.max_attempts = max_attempts
-        self._queue: queue.Queue[Job] = queue.Queue(maxsize=queue_size)
+        self.queue_size = max(1, int(queue_size))
+        self._fifo: deque[Job] = deque()
         self._latest: dict[str, Job] = {}
-        self._latest_lock = threading.Lock()
+        self._lock = threading.Lock()          # guards _fifo and _latest
         self._stop_event = threading.Event()
         self._wake = threading.Event()
         self.fatal: BaseException | None = None
@@ -180,27 +190,42 @@ class Sender(threading.Thread):
 
     # ---- producer side ------------------------------------------------
     def submit(self, job: Job) -> None:
-        while True:
-            try:
-                self._queue.put_nowait(job)
-                break
-            except queue.Full:
-                try:
-                    old = self._queue.get_nowait()
-                    self.stats["dropped"] += 1
-                    log.warning("sender queue full - dropped %s for camera %s", old.kind, old.camera_id)
-                except queue.Empty:
-                    pass
+        """Queue ``job`` FIFO. When the queue is full, the oldest job that is not ``essential``
+        is dropped (the new one itself when it is the only such job); only when every queued
+        job is essential does the oldest one go. Essential jobs keep their order.
+
+        During an API outage the queue fills up (one job is retried for about a minute at a
+        time); counts-only batches must not push the read batches out (13 Oct 2026: 229 batches
+        dropped in an 8-minute outage).
+        """
+        with self._lock:
+            dropped: Job | None = None
+            if len(self._fifo) >= self.queue_size:
+                victim = next((i for i, j in enumerate(self._fifo) if not j.essential), None)
+                if victim is None and not job.essential:
+                    dropped = job
+                else:
+                    victim = 0 if victim is None else victim
+                    dropped = self._fifo[victim]
+                    del self._fifo[victim]
+            if dropped is not job:
+                self._fifo.append(job)
+            if dropped is not None:
+                self.stats["dropped"] += 1
+        if dropped is not None:
+            log.warning("sender queue full - dropped %s for camera %s%s", dropped.kind,
+                        dropped.camera_id,
+                        " (with reads/sightings/events)" if dropped.essential else "")
         self._wake.set()
 
     def submit_latest(self, key: str, job: Job) -> None:
-        with self._latest_lock:
+        with self._lock:
             self._latest[key] = job
         self._wake.set()
 
     def pending(self) -> int:
-        with self._latest_lock:
-            return self._queue.qsize() + len(self._latest)
+        with self._lock:
+            return len(self._fifo) + len(self._latest)
 
     def stop(self, flush_timeout_s: float = 10.0) -> None:
         """Ask the thread to drain the queue and exit (SIGTERM path)."""
@@ -209,8 +234,11 @@ class Sender(threading.Thread):
         self.join(timeout=flush_timeout_s)
 
     # ---- consumer side ------------------------------------------------
-    def _next_latest(self) -> Job | None:
-        with self._latest_lock:
+    def _next_job(self) -> Job | None:
+        """The oldest FIFO job; when there is none, the oldest pending "latest wins" job."""
+        with self._lock:
+            if self._fifo:
+                return self._fifo.popleft()
             if not self._latest:
                 return None
             key = next(iter(self._latest))
@@ -235,7 +263,7 @@ class Sender(threading.Thread):
                 log.warning("dropped %s for camera %s: %s", job.kind, job.camera_id, exc)
                 return
             except RetryableError as exc:
-                if job.kind in ("snapshot", "heartbeat", "overlay") or job.attempts >= self.max_attempts:
+                if job.kind in NO_RETRY_KINDS or job.attempts >= self.max_attempts:
                     self.stats["failed"] += 1
                     log.warning("giving up on %s for camera %s after %d attempt(s): %s",
                                 job.kind, job.camera_id, job.attempts, exc)
@@ -252,11 +280,7 @@ class Sender(threading.Thread):
 
     def run(self) -> None:
         while True:
-            job: Job | None = None
-            try:
-                job = self._queue.get_nowait()
-            except queue.Empty:
-                job = self._next_latest()
+            job = self._next_job()
             if job is None:
                 if self._stop_event.is_set():
                     return

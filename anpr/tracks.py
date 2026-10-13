@@ -65,7 +65,13 @@ def crop_with_context(image: np.ndarray, box: Box, mx: float = 0.08, my: float =
 
 @dataclass
 class Shot:
-    """One candidate crop of a track."""
+    """One candidate crop of a track.
+
+    ``frame`` is the decoded frame the crop was cut from: the sighting frame of this shot's read,
+    so the frame always matches the read's ``captured_at``. ``crop`` is a view into that array,
+    so the reference costs no memory of its own; a track holds at most ``keep`` frames, released
+    when the shot falls out of the best-``keep`` list or the track ends.
+    """
 
     crop: np.ndarray
     box: Box
@@ -74,6 +80,7 @@ class Shot:
     frame_index: int
     sharp: float
     score: float
+    frame: np.ndarray | None = None
 
     @property
     def width(self) -> int:
@@ -206,7 +213,7 @@ class PlateTracker:
                 continue
             sharp = sharpness(crop)
             shot = Shot(crop=crop, box=b, captured_at=captured_at, stream_pts=stream_pts, frame_index=frame_index,
-                        sharp=sharp, score=shot_score(b.w, sharp))
+                        sharp=sharp, score=shot_score(b.w, sharp), frame=image)
             if t is None:
                 t = Track(id=self._next_id, camera_id=self.camera_id, box=b, first_seen=captured_at,
                           last_seen=captured_at, last_pts=stream_pts)
