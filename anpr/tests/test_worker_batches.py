@@ -12,7 +12,9 @@ DB-free and model-free: the Pipeline is assembled without detector / OCR models 
 """
 from __future__ import annotations
 
+import gc
 import time
+import weakref
 from datetime import datetime, timedelta, timezone
 
 import cv2
@@ -335,3 +337,33 @@ def test_voted_read_carries_the_best_members_own_frame():
 
     p._accept_reads(p.cameras[1], [read])
     assert read.frame is None                     # released once its JPEG is encoded
+
+
+def test_shot_frames_stay_bounded_and_are_released_once_the_read_is_accepted():
+    # Memory: an open track pins at most ``keep`` decoded frames (its crops are views into them
+    # anyway), the vote bucket one, and no frame outlives the accepted read: the sighting keeps
+    # only its JPEG.
+    p = make_pipeline()
+    cam = p.cameras[1]
+    p.ocr = fixed_ocr(VALID)
+    p.evidence = EvidenceStore(None)
+    alive: list[weakref.ref] = []
+    for n in range(8):                            # still growing: no OCR before the track ends
+        image = scene(10 + 20 * n)
+        alive.append(weakref.ref(image))
+        frame = Frame(1, image, T0 + timedelta(seconds=0.25 * n), 0.25 * n, n)
+        p._track_boxes(cam, frame, [Box(300, 300, 100 + 10 * n, 30, 0.9, "contour")])
+        del image, frame
+    gc.collect()
+    assert sum(ref() is not None for ref in alive) == cam.tracker.keep
+
+    p._track_boxes(cam, Frame(1, scene(GONE), T0 + timedelta(seconds=4.0), 4.0, 9), [])
+    gc.collect()
+    assert p.voter.open_buckets(1) == 1
+    assert sum(ref() is not None for ref in alive) == 1          # the bucket's best member
+
+    p._tick_camera(cam, T0 + timedelta(seconds=30.0))
+    gc.collect()
+    assert [r.plate_norm for r in cam.pending.reads] == [VALID]
+    assert p.sightings.open_sightings(1)[0].best_frame_jpeg
+    assert sum(ref() is not None for ref in alive) == 0

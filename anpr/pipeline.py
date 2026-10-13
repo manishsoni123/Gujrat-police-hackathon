@@ -69,8 +69,10 @@ FRAME_JPEG_WIDTH = 960          # CONTRACT section 7.2: sighting frames are 960 
 SNAPSHOT_MAX_BYTES = 150_000
 MIN_OCR_CHARS = 6
 # The longest registration is 11 characters (CONTRACT 3.4 standard pattern: 2 state letters,
-# 2 district digits, 3 series letters, 4 digits, e.g. DL10CAB1234); a longer OCR string is a plate
-# read together with the burnt-in caption or a signboard line beside it.
+# 2 district digits, 3 series letters, 4 digits, e.g. DL10CAB1234). normalise() validates only
+# up to 10, so 11 also keeps a 10-character plate read with one stray glyph, which still votes
+# with the plate (Levenshtein 1). A longer OCR string is a plate read together with the
+# burnt-in caption or a signboard line beside it.
 MAX_OCR_CHARS = 11
 API_PLATE_NORM_MAX = 16          # /internal/detections schema: reads[] / sightings[] plate_norm
 API_PLATE_RAW_MAX = 64           # reads[].plate_raw; one longer item gets the whole batch a 422
