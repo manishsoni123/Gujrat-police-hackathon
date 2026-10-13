@@ -1,4 +1,5 @@
-# GPU overrides for the NVIDIA VM (T4 / g4dn.2xlarge / NC8as_T4_v3).
+# GPU overrides for an NVIDIA host: the T4 VM (g4dn.2xlarge / NC8as_T4_v3), or a
+# laptop with an NVIDIA GPU under Docker Desktop/WSL2 (first run 12 Oct 2026, RTX 4050).
 #
 # Use together with COMPOSE_PROFILES=gpu in deploy/.env:
 #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml \
@@ -18,6 +19,9 @@
 #
 # Requirements on the host: NVIDIA driver >= 535, nvidia-container-toolkit
 # (deploy.sh --gpu installs it), `docker info` listing the nvidia runtime.
+# Docker Desktop with the WSL2 backend provides that runtime itself (Windows
+# NVIDIA driver only). Name the GPU workers (anpr-live-gpu / anpr-preindex-gpu)
+# on the command line: naming anpr-live starts its CPU twin (same container name).
 
 services:
   mediamtx:
@@ -42,6 +46,6 @@ services:
   api:
     environment:
       # Forced (not ${MEDIAMTX_TRANSCODE}) so the CPU default in deploy/.env
-      # cannot silently disable NVENC on the GPU VM. Drop this file to keep
+      # cannot silently disable NVENC on a GPU host. Drop this file to keep
       # libx264 transcoding on a GPU host.
       MEDIAMTX_TRANSCODE: nvenc

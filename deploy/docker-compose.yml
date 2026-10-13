@@ -391,7 +391,7 @@ services:
           cpus: "${ANPR_PREINDEX_CPUS:-3}"
           memory: ${ANPR_PREINDEX_MEMORY:-2g}
 
-  # ---------------------------------------------------------------- ANPR workers (GPU profile, NVIDIA VM only)
+  # ---------------------------------------------------------------- ANPR workers (GPU profile: NVIDIA VM, or an NVIDIA laptop under Docker Desktop/WSL2)
   anpr-live-gpu:
     build:
       context: .

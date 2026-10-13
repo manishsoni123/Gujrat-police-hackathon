@@ -60,6 +60,10 @@ node scripts/integration_checks.mjs b     # after the ANPR workers ran >= 2 min:
 # Live-stack scripts inside the api container (not collected by pytest)
 $DC exec api python tests/live/phase1_api.py    # also phase2_streams.py, phase3_offline_online.py, phase4_sandbox_secrets.py
 
+# After a CONTRACT §3.4 normaliser change: re-apply it to stored reads/sightings (stored rows keep their old plate_norm)
+$DC exec api python -m app.jobs.renormalise --dry-run   # default; read-only, JSON counts + examples
+$DC exec api python -m app.jobs.renormalise --run       # writes plate_reads/sightings/qa_labels + audit plates.renormalise
+
 # Browser journeys / screenshots (running stack + local Google Chrome)
 cd frontend && node e2e/final_journey.mjs       # -> docs/screenshots/final/
 make deliverables                               # PDFs + PPTX into docs/export (Node 24, no Docker)
@@ -99,7 +103,7 @@ The organiser relay (`103.250.160.189`) refuses bursts of connections and answer
 
 ### ANPR worker (`anpr/`)
 
-One process = N ffmpeg decoder threads (`decode.py`: `-rtsp_transport tcp`, no ffprobe before an RTSP dial, newest frame only, 2→30 s backoff, `DialGate`) + **one** inference loop (`pipeline.py`) + one HTTP sender thread (`client.py`) + one control thread (config reload, heartbeat). Per frame: `detector.py` (`onnx` YOLO-v9-t | `contour` | `auto`, plus `TiledDetector`, `OsdMask`, `StaticBoxFilter`) → `tracks.py` best-shot `PlateTracker` → `ocr.py` (`paddle` | `fast_plate` | `ensemble`) → `normalise.py` → `voting.py` (3 s char-wise vote) → `sightings.py` → batched POSTs. The worker never touches the database or the MediaMTX API.
+One process = N ffmpeg decoder threads (`decode.py`: `-rtsp_transport tcp`, no ffprobe before an RTSP dial, newest frame only, 2→30 s backoff, `DialGate`) + **one** inference loop (`pipeline.py`) + one HTTP sender thread (`client.py`) + one control thread (config reload, heartbeat). Per frame: `detector.py` (`onnx` YOLO-v9-t | `contour` | `auto`, plus `TiledDetector`, `OsdMask`, `StaticBoxFilter`) → `tracks.py` best-shot `PlateTracker` → `ocr.py` (`paddle` | `fast_plate` | `ensemble`) → `normalise.py` → `voting.py` (3 s char-wise vote) → `sightings.py` → batched POSTs (one camera per batch: posted at once when it holds a valid-format read, otherwise every `POST_BATCH_S`). In live mode `overlay.py` (`ANPR_OVERLAY`) also posts the newest boxes of cameras someone is watching to `/internal/overlay`. The worker never touches the database or the MediaMTX API.
 
 Config precedence (`config.py`): CLI > env > server `/internal/anpr-config` settings > `config.yml` > defaults; a value pinned by env or CLI is never overridden by the server. A new tunable needs an entry in `ENV_MAP`, the compose `x-anpr-env` block and `deploy/.env.example`. Model weights are SHA-256 verified at build (`weights/HASHES.txt`, `weights/download.py`) and again at start; missing ONNX weights start the worker **degraded** (`contour-fallback` in the heartbeat) rather than crashing.
 
@@ -120,5 +124,5 @@ React 18 + Vite + strict TypeScript + Ant Design 5, zustand stores (`store/`), T
 - A new runtime setting needs: an env default in `core/config.py`, a `settings_service` entry, `deploy/.env.example` documentation and a CONTRACT amendment row.
 - Line endings are LF everywhere, enforced by `.gitattributes`; do not set `core.autocrlf`. Python: 4 spaces, 100 columns. TS/JS/YAML: 2 spaces. Makefile: tabs.
 - Large binaries (videos, ONNX weights, crops, PDFs, screenshots) are git-ignored by design; see SETUP.md §9 for how each is regenerated.
-- The GPU profile cannot run on the laptop; validate compose changes with `make gpu-config` and keep `deploy/docker-compose.gpu.yml` in sync with the cpu services.
+- The GPU profile runs on an NVIDIA laptop (first run 12 Oct 2026: RTX 4050, Docker Desktop/WSL2, which provides the `nvidia` runtime) as well as on the CUDA VM. Name the GPU services (`anpr-live-gpu`, `anpr-preindex-gpu`): naming `anpr-live` starts its CPU twin, which has the same container name. When GitHub weight downloads fail, pre-place the verified `.onnx` files in `anpr/weights/` and build the image with `--build-arg DOWNLOAD_WEIGHTS=0` (hash-checked against `weights/HASHES.txt`; keep the same value on later builds, a different one re-runs the pip layer). On a machine without a GPU validate compose changes with `make gpu-config`; keep `deploy/docker-compose.gpu.yml` in sync with the cpu services.
 - `scripts/` holds one-off measurement tools for the real feed (`collect_crops.py`, `eval_ocr_bank.py`, `measure_live_anpr.mjs`, `survey_anpr.py`, `loopcheck.mjs`); they write under `media/anpr_*` and `media/loopcheck`, which stay on the laptop.
