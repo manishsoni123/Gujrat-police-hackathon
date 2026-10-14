@@ -16,24 +16,27 @@ rtsp://mediamtx:8554/cam_<id> ──ffmpeg──▶ 960 px BGR frames (newest on
       ▼
  objects.py (YOLOX-s every 5th frame → tracker → per-minute counts, intrusion zones)
       ▼
- client.py  POST /internal/detections (1 s batches, one camera per request), /snapshots (1 s),
-            /heartbeat (15 s), /events; GET /internal/anpr-config every 60 s
+ client.py  POST /internal/detections (one camera per request: at once when the batch holds a
+            valid-format read, else every POST_BATCH_S = 1 s), /snapshots (1 s), /overlay (live boxes
+            of watched cameras, latest wins; overlay.py), /heartbeat (15 s), /events;
+            GET /internal/anpr-config every 60 s
 ```
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `pipeline.py` | Main loop, camera reconciliation, batching, loop-reset handling, SIGTERM flush, `ANPR_INVALID_READS_PER_MIN` cap (at most N invalid-format reads per camera per minute; valid plates never capped), heartbeat `extra.suppression` counters. `python -m anpr.pipeline` |
+| `pipeline.py` | Main loop, camera reconciliation, batching (a camera's batch is posted in the tick that accepts a valid-format read - the only kind that can raise a watchlist alert - and carries everything else pending for that camera; otherwise every `POST_BATCH_S`; vote expiry also runs right after each camera's own frame), loop-reset handling, SIGTERM flush, `ANPR_INVALID_READS_PER_MIN` cap (at most N invalid-format reads per camera per minute; valid plates never capped), heartbeat `extra.suppression` counters. `python -m anpr.pipeline` |
 | `decode.py` | `ffmpeg` wrapper: `-rtsp_transport tcp`, `-timeout` 30 s (`ANPR_RTSP_TIMEOUT_S`), `-threads 2` (`ANPR_DECODE_THREADS`), `-hwaccel cuda` unless `CPU=1`, time-based frame selection for RTSP (`1/ANPR_FPS`, loop-jump safe, no source fps needed) / `select=not(mod(n,K))` for files, `scale=<FRAME_WIDTH>:-2`, raw `bgr24` pipe, PTS from `showinfo`; **no `ffprobe` before an RTSP dial** (stream info parsed from ffmpeg's stderr; `ANPR_RTSP_PROBE=1` + `ANPR_PROBE_TIMEOUT_S` restore it); 90 s first-frame budget (`ANPR_START_TIMEOUT_S`), 60 s stall watchdog (`ANPR_STALL_TIMEOUT_S`), restart backoff 2→30 s reset only after a session that delivered frames for > 60 s; `DialGate` = one decoder dials at a time, `ANPR_DIAL_SPACING_S` (3 s) apart; file sources for tests |
-| `detector.py` | `TiledDetector` (`ANPR_DET_TILE` px tiles + whole frame, IoU merge, plausibility filter; off by default), `OsdMask` (`ANPR_OSD_BAND`: boxes centred in the top/bottom 8 % of the frame are never plates; `ANPR_OSD_WARMUP_S`: static-text regions = low temporal variance + strong edges in ≥ 80 % of 30 s of samples, refreshed every 30 s), `StaticBoxFilter` (`ANPR_STATIC_BOX_WINDOW`: boxes present in 80 % of the last N frames are overlays/signboards, muted), `onnx` (open-image-models YOLO-v9-t-384 end-to-end), `contour` (bright quadrilaterals, 0.15 ≤ h/w ≤ 0.6, w ≥ `ANPR_MIN_PLATE_W`, fill ≥ 0.6), `auto` (ONNX, contour only when ONNX finds nothing) |
+| `detector.py` | `TiledDetector` (`ANPR_DET_TILE` px tiles + whole frame, plausibility filter; boxes of one plate are merged greedily by IoU or containment, and a box cut at an interior tile edge is folded into the rest of its plate - CONTRACT §7.7 amendment of 13 Oct, synthetic cams 1-3 + own gate (live profile, 13 Oct): 19/32 → 30/32 exact reads; off by default), `OsdMask` (`ANPR_OSD_BAND`: boxes centred in the top/bottom 8 % of the frame are never plates; `ANPR_OSD_WARMUP_S`: static-text regions = low temporal variance + strong edges in ≥ 80 % of 30 s of samples, refreshed every 30 s), `StaticBoxFilter` (`ANPR_STATIC_BOX_WINDOW`: boxes present in 80 % of the last N frames are overlays/signboards, muted), `onnx` (open-image-models YOLO-v9-t-384 end-to-end), `contour` (bright quadrilaterals, 0.15 ≤ h/w ≤ 0.6, w ≥ `ANPR_MIN_PLATE_W`, fill ≥ 0.6), `auto` (ONNX, contour only when ONNX finds nothing) |
 | `ocr.py` | OCR backends (`ANPR_OCR`): `paddle` = PaddleOCR (English det PP-OCRv3 + rec PP-OCRv4) on an enhanced crop (`enhance_crop`: 6 px border, ×4 cubic upscale, gamma for dark crops, conservative inversion for white-on-black, CLAHE), det+rec on every crop by default (`ANPR_OCR_PADDLE_MODE=det`; the detector's tight text-line box is what makes PP-OCRv4 read a plate, recognition on the whole padded crop misreads; `auto` = rec-only on single-line crops), drops the vertical `IND` strip box, re-recognises a split line, lines joined with `\n`; `fast_plate` = fast-plate-ocr 1.1.0 (MIT) `global_mobile_vit_v2_ocr` / `cct_s_v2_global` ONNX recogniser, hash-verified; `ensemble` = both, agreement wins. Numbers per backend on the organiser crop bank: `docs/anpr-accuracy.md` |
 | `tracks.py` | `PlateTracker` (`ANPR_BEST_SHOT`): per-camera IoU / centre-distance association of plate boxes across frames, the 3 best shots per track (width × Laplacian sharpness), OCR only when a track settles, grows ≥ 25 % or ends; `track_kind` classifies every ended track as `plate` (valid-format read), `vehicle` (box never read / invalid string) or `text` (letters-only OCR on every pass = signboard or burnt-in caption - counted separately, never a vehicle) |
 | `evidence.py` | `EvidenceStore` (`ANPR_EVIDENCE_DIR`): one JPEG crop + JSON line per detected vehicle (UTC timestamps, bbox, width, frames, `kind` = `plate` \| `vehicle`, plate if read) under `<dir>/<camera>/<date>/`, capped per camera per hour; `text` tracks get no file |
-| `normalise.py` | The exact §3.4 algorithm (shared 20 test vectors with the backend) |
+| `normalise.py` | The exact §3.4 algorithm incl. the CONTRACT amendments: step 5a (the first two letters must be a real state/UT code, or become one through a unique one-glyph fix `I/L/U→J`, `C→G`, `O→D/G`, counted as a substitution) and the real-district rule (district characters all digits, not `0` / `00`). Shares the 20 contract vectors + `STATE_VECTORS` (12) + `DISTRICT_VECTORS` (12) with `backend/app/services/plates.py` (`backend/tests/test_normalise.py`); `frontend/src/utils/plate.ts` ports the same rules - change all three or none. Rows stored before a rule change keep their `plate_norm` until `python -m app.jobs.renormalise --run` (api container, README §7) |
 | `voting.py` | Per (camera, plate bucket) window; position-wise majority string, mean confidence, best member's bbox/crop/frame. `plate_raw` comes from the highest-confidence member that **agrees with the vote** (fallback: display form of the voted string), so the API's re-normalisation of `plate_raw` (CONTRACT §7.2) reproduces the voted `plate_norm` instead of undoing the correction |
 | `sightings.py` | `camera:plate:first_seen_ms` keys, best-read tracking, dirty flags for idempotent upserts |
 | `objects.py` | YOLOX-s COCO ONNX, greedy IoU tracker (≥ 0.3), once-per-minute-per-track counts, polygon zones with IST active windows and dwell ≥ `dwell_s` |
+| `overlay.py` | Live detection overlay (`ANPR_OVERLAY`, default on, live mode only; CONTRACT amendment 2026-10-12). For each camera somebody is watching (a `/ws/reads/{id}` subscriber, from the API's `watched` answer) it keeps only the newest processed frame: the plate tracks seen in it (labelled with the track's most frequent valid read) and the YOLOX boxes no older than 3 s, as 0..1 fractions of the frame. The newest frames of all cameras go out in one `POST /internal/overlay` whenever the sender is free (latest wins, no retry, no backlog); with nobody watching it only polls with an empty batch every 2 s; a 404 (older API) switches it off. Heartbeat `extra.overlay` = `{enabled, sent_frames}` |
 | `client.py` | `X-API-Key` client, status policy (retry 5xx/network, drop 4xx, exit 3 on 401), background sender, `API_DRY_RUN` |
 | `config.py` / `config.yml` | Settings: CLI > env > server `settings` > `config.yml` > defaults |
 | `tools/eval_synthetic.py` | Accuracy/throughput scorer against `media/synthetic/plates.json` (`--cameras 1 2 …`, `--own-gate` for the synthetic own-gate loop) |
@@ -142,8 +145,12 @@ Extra (testing / tuning):
 ```bash
 # CPU image (laptop); build context is the repository root
 docker build -f anpr/Dockerfile -t sentinel-anpr .
-# GPU image (VM with NVIDIA driver >= 535 + nvidia-container-toolkit; not testable on the laptop)
+# GPU image (VM: NVIDIA driver >= 535 + nvidia-container-toolkit; laptop: Docker Desktop/WSL2 provides the
+# nvidia runtime - first run 12 Oct 2026 on an RTX 4050 laptop)
 docker build -f anpr/Dockerfile --build-arg ANPR_BASE=gpu -t sentinel-anpr:gpu .
+# ... offline, when the GitHub weight downloads fail: pre-place the .onnx files of weights/HASHES.txt in
+# anpr/weights/ (still SHA-256 verified; keep the same DOWNLOAD_WEIGHTS on rebuilds or the pip layer re-runs)
+docker build -f anpr/Dockerfile --build-arg ANPR_BASE=gpu --build-arg DOWNLOAD_WEIGHTS=0 -t sentinel-anpr:gpu .
 
 # Unit tests (no models needed)
 docker run --rm sentinel-anpr python -m pytest -q anpr/tests
@@ -202,7 +209,11 @@ yields 5–10 OCR calls and one voted read per 3 s window – sufficient for the
 - `paddleocr` sets the root logger to WARNING on import; the worker restores its level afterwards.
 - PaddleOCR ships no PP-OCRv4 **English detection** model; the English det model is PP-OCRv3
   (recognition is PP-OCRv4). Models are fetched at build time into `/root/.paddleocr/whl/`.
-- Route legs on the 90 s synthetic loop are always flagged `implausible_speed` by the API – expected.
+- Route legs on the 90 s synthetic loop are flagged `implausible_speed` by the API whenever they are faster
+  than `route.speed_flag_kmh` (default 150 km/h) – that is almost every leg, and expected. A leg that skips a
+  stop whose read was missed in that loop can be slower and stays unflagged, e.g. the cam 1 → cam 6 hop of
+  `GJ01AB1234` seen on 13 Oct (1.43 km in about 45 s, ≈ 115 km/h, no cam 3 or own-gate read between them)
+  or cam 1 → cam 2 (1.97 km in about 67 s) when cams 3 and 6 are both missed.
 - **Voted `plate_norm` vs `plate_raw` (fixed 5 Sept).** The read's `plate_raw` used to be the best member's raw OCR even when the vote had out-voted it; the API re-normalises `plate_raw` and overrode the vote, so a corrected mis-read (`GJ 01 AB 1284` voted to `GJ01AB1234`) was stored under the wrong plate while its sighting carried the voted one. `voting.raw_for_vote` now takes the raw string of a member that agrees with the vote; `test_voting.py` asserts `normalise(read.plate_raw).plate_norm == read.plate_norm` for every emitted read.
 - The container runs as uid 10001 (`USER anpr`), writes nothing at run time and works with `read_only: true` + `tmpfs: /tmp`; `docker exec sentinel-anpr-live id` must not print `uid=0`.
 - **RTSP end-of-stream is a reconnect, not a stop.** A clean ffmpeg EOF only stops *file* sources;

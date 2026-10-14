@@ -68,7 +68,8 @@ anpr_max_boxes: 4             # OCR budget per frame (largest / most confident b
 # snapshots and batching (live mode)
 snapshot_interval_s: 1
 snapshot_width: 480
-post_batch_s: 1
+post_batch_s: 1               # periodic /internal/detections batch per camera; a batch that holds a valid-format read is posted at once
+# anpr_overlay: true          # ANPR_OVERLAY (default true): live box overlay for watched cameras, POST /internal/overlay (live mode only)
 config_reload_s: 60
 heartbeat_s: 15
 

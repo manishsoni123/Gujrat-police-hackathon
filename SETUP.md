@@ -17,7 +17,7 @@ develop the frontend outside the container.
 | `api` | FastAPI backend: REST, WebSockets, health poller, alerts, reports | internal only (`/api/*` via Caddy) |
 | `postgres` | PostGIS 16 | internal only |
 | `mediamtx` | RTSP/WebRTC/HLS relay: every camera stream goes through it | 8189 (WebRTC), 8554/8888/8889 on 127.0.0.1 |
-| `anpr-live`, `anpr-preindex` | Plate detection + OCR workers (CPU profile) | none |
+| `anpr-live`, `anpr-preindex` | Plate detection + OCR workers (CPU profile; `anpr-live-gpu`, `anpr-preindex-gpu` on the GPU profile, §5.1) | none |
 | `synth` | one-shot generator of the 8 synthetic demo camera videos | none |
 
 Source layout: `backend/` (API), `frontend/` (SPA), `anpr/` (workers), `deploy/` (compose, Caddyfile,
@@ -86,6 +86,36 @@ its first start, so there is no separate migration or seed step.
 
 With `make`: `make env synthetic up` does the same three steps; `make help` lists every target.
 
+### 5.1 GPU profile on a laptop with an NVIDIA GPU (optional)
+
+The `gpu` profile (CUDA inference, NVDEC decode, NVENC transcodes in MediaMTX) also runs on a laptop:
+it was first run on 12 Oct 2026 on an RTX 4050 laptop under Docker Desktop with the WSL2 backend.
+Docker Desktop provides the `nvidia` runtime itself (`docker info` lists it under Runtimes); you need
+the NVIDIA Windows driver, not a separate container toolkit.
+
+- In `deploy/.env` set `COMPOSE_PROFILES=gpu` and size the GPU workers (`ANPR_LIVE_GPU_*`,
+  `ANPR_PREINDEX_GPU_*`) with the laptop column documented in `deploy/.env.example`; the CPU workers'
+  `ANPR_LIVE_MEMORY` / `ANPR_PREINDEX_MEMORY` do not apply to them.
+- **Every** compose command then needs `-f deploy/docker-compose.gpu.yml` as well (the `Makefile`,
+  `deploy/reset-db.sh` and `deploy/deploy.sh` add it). Without it `up` recreates MediaMTX without NVENC and every
+  H.265 camera goes black.
+- The workers are `anpr-live-gpu` and `anpr-preindex-gpu`. Do not name `anpr-live` / `anpr-preindex` on
+  the command line: that starts the CPU twin, which has the same container name.
+- If the weights download from GitHub fails during the build, put the `.onnx` files listed in
+  `anpr/weights/HASHES.txt` into `anpr/weights/` (from a teammate) and build offline; both GPU workers use
+  the one image `sentinel-anpr:gpu` (`$DC` is the compose prefix from §7):
+
+  ```bash
+  $DC -f deploy/docker-compose.gpu.yml build --build-arg DOWNLOAD_WEIGHTS=0 anpr-live-gpu
+  $DC -f deploy/docker-compose.gpu.yml up -d anpr-live-gpu anpr-preindex-gpu
+  ```
+
+  `DOWNLOAD_WEIGHTS=0` still checks every file against `HASHES.txt` and fails the build when one is
+  missing or different. Keep the same value on later builds of that image: a different value re-runs the
+  pip install layer.
+- Check: `docker logs sentinel-anpr-live` shows `ONNX plate detector … on CUDAExecutionProvider` and
+  `hwaccel=cuda` on every `dialling` line.
+
 ## 6. Log in
 
 Open **http://localhost**.
@@ -120,7 +150,7 @@ function dc { docker compose -f deploy/docker-compose.yml --env-file deploy/.env
 | Status | `$DC ps` | `make ps` |
 | Follow logs | `$DC logs -f --tail 200 api` (any service name, or none for all) | `make logs S=api` |
 | Restart one service | `$DC restart api` | |
-| Rebuild after a code change | `$DC up -d --build api` (or `web`, `anpr-live anpr-preindex`) | `make up` |
+| Rebuild after a code change | `$DC up -d --build api` (or `web`, `anpr-live anpr-preindex`; GPU profile: `anpr-live-gpu anpr-preindex-gpu`, §5.1) | `make up` |
 | Stop (keeps data) | `$DC down` | `make down` |
 | Wipe the database and re-seed | `bash deploy/reset-db.sh --yes` | `make reset-db` |
 | Delete everything incl. volumes | `$DC down --volumes` | `make clean` |
@@ -129,7 +159,8 @@ function dc { docker compose -f deploy/docker-compose.yml --env-file deploy/.env
 | Worker tests | `$DC run --rm --no-deps anpr-live python -m pytest -q anpr/tests` | |
 | Shell in the API | `$DC exec api bash` | `make shell-api` |
 | psql | `$DC exec postgres sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB'` | `make psql` |
-| Scripted acceptance checks (105) | `node scripts/integration_checks.mjs` against a running stack | |
+| Scripted acceptance checks (phase a + b) | `node scripts/integration_checks.mjs a`, then `… b` against a running stack | |
+| Re-apply plate normalisation to stored rows (after a CONTRACT §3.4 change) | `$DC exec api python -m app.jobs.renormalise --dry-run` (read-only report), then `--run` (README §7) | |
 
 ## 8. Developing
 
@@ -173,7 +204,8 @@ journey against the running stack and writes screenshots to `docs/screenshots/fi
   the password only when it creates the volume. Run `bash deploy/rotate-db-password.sh --generate`,
   or wipe with `bash deploy/reset-db.sh --yes`.
 - **Weights download fails during the build.** Retry (`$DC build anpr-live`). Offline: get the `.onnx`
-  files from a teammate into `anpr/weights/` and build with `--build-arg DOWNLOAD_WEIGHTS=0`.
+  files from a teammate into `anpr/weights/` and build with `--build-arg DOWNLOAD_WEIGHTS=0` (GPU profile:
+  the `anpr-live-gpu` build in §5.1).
 - **`bash deploy/reset-db.sh` fails with a `\r: command not found` error.** Your checkout has CRLF line
   endings. Run `git config core.autocrlf false`, then `git rm --cached -r . && git reset --hard`.
 - **Docker Desktop runs out of memory.** Raise it in *Settings → Resources*, or lower the per-service
