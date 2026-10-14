@@ -386,7 +386,7 @@ flowchart LR
   T --> A2["GET /v3/config/paths/list<br/>missing path → re-create (self-healing)"]
   T --> B["Catalogue live flag<br/>(from last import)"]
   A --> C{"ready?"}
-  C -- "no, live≠false, has rtsp_url" --> PR["Active ffprobe over TCP<br/>≤ 20 idle cameras per tick, 4 in parallel"]
+  C -- "no, live≠false, has rtsp_url" --> PR["Active ffprobe over TCP<br/>≤ HEALTH_PROBE_MAX (2) idle cameras per tick,<br/>HEALTH_PROBE_PARALLEL (2) through the DialGate,<br/>each camera at most every 900 s"]
   C -- "yes" --> S
   PR --> S["camera_health_log row per camera<br/>is_ready · has_video · bytes_delta · source_flag"]
   B -- "live=false → not probed, source_flag=catalogue" --> S
@@ -702,7 +702,7 @@ sequenceDiagram
 - **Confirm/reject** is per (query plate, sighting), upserted and audited; the route uses exact hits plus confirmed fuzzy hits minus rejections (`include=confirmed`), or every candidate marked (`include=all`).
 - **Route**: sightings ordered by `first_seen`; same-camera sightings within 60 s merged into one stop; per leg distance (haversine), minutes, speed; flags `implausible_speed` (> 150 km/h, configurable), `long_gap` (> 6 h), `overlap`. Straight-segment polyline with one `[lat, lon]` per sighting; total distance, duration, cameras count, loop resets in window.
 - **Output**: timeline table in IST, numbered map, crops strip, "Play recording" per sighting, PDF with static map, table, crops, flags, evidence hash and watermark.
-- On the 90 s synthetic loop almost every leg is correctly flagged `implausible_speed` (cameras 1–7 km apart, seconds apart) — shown as an amber badge, not an error; a leg that skips a stop whose read was missed in that loop can be slower than the threshold and stays unflagged, e.g. the cam 1 → cam 6 hop of `GJ01AB1234` seen on 13 Oct (1.43 km in about 45 s, ≈ 115 km/h, below the 150 km/h threshold). On the sandbox's synchronised 12 h timeline the flags are meaningful.
+- On the 90 s synthetic loop most legs are correctly flagged `implausible_speed` (cameras 1–7 km apart, seconds apart) — shown as an amber badge, not an error. The regular cam 1 → cam 3 hop (0.44 km in about 20 s, ≈ 79 km/h) is always unflagged (and below the 0.5 km cut of acceptance check 16). A leg that skips a stop whose read was missed in that loop can be slower than the threshold and stays unflagged, e.g. the cam 1 → cam 6 hop of `GJ01AB1234` seen on 13 Oct (1.43 km in about 45 s, ≈ 115 km/h, below the 150 km/h threshold). On the sandbox's synchronised 12 h timeline the flags are meaningful.
 
 This is the Phase 2 deliverable: the complete route and a timestamped, location-wise movement history for a plate given on the day, whether it was pre-indexed or read live minutes earlier.
 

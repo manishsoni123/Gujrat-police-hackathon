@@ -210,7 +210,7 @@ yields 5–10 OCR calls and one voted read per 3 s window – sufficient for the
 - PaddleOCR ships no PP-OCRv4 **English detection** model; the English det model is PP-OCRv3
   (recognition is PP-OCRv4). Models are fetched at build time into `/root/.paddleocr/whl/`.
 - Route legs on the 90 s synthetic loop are flagged `implausible_speed` by the API whenever they are faster
-  than `route.speed_flag_kmh` (default 150 km/h) – that is almost every leg, and expected. A leg that skips a
+  than `route.speed_flag_kmh` (default 150 km/h) – that is most legs, and expected. The regular cam 1 → cam 3 hop (0.44 km in about 20 s, ≈ 79 km/h) is always unflagged (and below the 0.5 km cut of acceptance check 16). A leg that skips a
   stop whose read was missed in that loop can be slower and stays unflagged, e.g. the cam 1 → cam 6 hop of
   `GJ01AB1234` seen on 13 Oct (1.43 km in about 45 s, ≈ 115 km/h, no cam 3 or own-gate read between them)
   or cam 1 → cam 2 (1.97 km in about 67 s) when cams 3 and 6 are both missed.

@@ -242,7 +242,8 @@ Result over the 20 labelled reads: **7 exact (35 %)**, character accuracy ≈ 58
 **valid-format** reads alone it is 7 exact of 12 (58 %), and on cam07 (the only camera whose
 night plates are legible) 7 exact of 16 labelled. Every false *valid* read (`SI9E5995`,
 `GI27EW9901`, `OG9I7515`) passes the syntactic Indian-format check with a non-existent state
-code; a state-code table in `plates.normalise` would have rejected all three (roadmap, §6).
+code; a state-code table in `plates.normalise` would have rejected all three (roadmap, §6). *Adopted 12 Oct
+as CONTRACT §3.4 step 5a (§8): `GI27EW9901` is now repaired to `GJ27EW9901`, the other two are rejected.*
 `GET /api/reports/quality?from=…&to=…&source=sandbox` reproduces the figure for any window.
 
 ## 6. Why the numbers are what they are (evidence)
@@ -336,9 +337,9 @@ as `8G3O1NCO824`, `FSJO1NCO824`, `RGJO1VCOAZA` - never correctly.
   (mean edit distance to the truth on cam 81: 6.9 raw → 7.4 tight) while cct_xs improved
   (9.6 → 5.1, first `W` seen) - still 0 exact reads. At ~5 px per character the remedy is more
   pixels on the plate (camera placement / zoom), not preprocessing.
-* Noted, not changed: §3.4 step 5 accepts a k=2 candidate whose second "district digit" is a
-  letter when the regex can re-parse it as one digit + series (`GLOAE L2866` → `GJ0AEL2866`,
-  district 0).
+* Fixed 13 Oct (CONTRACT §3.4 real-district rule): a k=2 candidate whose second "district digit"
+  is a letter is no longer re-parsed as one digit + series; `GLOAE L2866` now normalises to
+  `GLOAEL2866` (invalid) instead of `GJ0AEL2866` (district 0).
 
 ## 9. 13 Oct 2026: tiled-detection merge (adopted), multi-frame fusion and YOLOX-m (rejected)
 
