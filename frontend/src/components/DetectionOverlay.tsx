@@ -2,13 +2,26 @@
  * Live detection boxes over the StreamPlayer <video> (CONTRACT amendment 2026-10-12): plate boxes
  * (labelled with the track's read once OCR produced one) and object boxes from `/ws/reads/{id}`
  * `overlay` frames. Coordinates are fractions of the decoded frame, mapped onto the letterboxed
- * (`object-fit: contain`) picture. A frame fades out when no newer one arrives within STALE_MS.
+ * (`object-fit: contain`) picture.
+ *
+ * Frames arrive at the worker's processed rate for the camera: several per second on the GPU profile,
+ * about one every 1.4 s on the 8-camera CPU worker (0.2-2 fps measured). A frame therefore stays up for
+ * STALE_INTERVALS observed inter-frame intervals (at least MIN_STALE_MS, at most MAX_STALE_MS) and fades
+ * only in the last part of that window, so boxes hold steady between updates at any cadence and still
+ * disappear soon after frames stop. The cadence comes from the overlay bus, which measures it from the
+ * camera's socket even while this canvas is unmounted, so the first frame after a (re)mount already
+ * gets the right window.
  */
 import { useEffect, useRef, type RefObject } from 'react';
 import type { WsOverlay, WsOverlayBox } from '@/api/types';
-import { subscribeOverlay } from '@/ws/overlayBus';
+import { OUTAGE_GAP_MS, overlayCadenceMs, subscribeOverlay } from '@/ws/overlayBus';
 
-const STALE_MS = 1500;
+const MIN_STALE_MS = 1500;
+/** Longer gaps are outages, not the cadence (overlay bus), so no frame outlives one. */
+const MAX_STALE_MS = OUTAGE_GAP_MS;
+const STALE_INTERVALS = 2.5;
+/** Full opacity for this share of the stale window, then a linear fade to 0. */
+const FADE_FROM = 0.6;
 const REDRAW_MS = 250;
 const PLATE_COLOUR = '#FACC15';
 const OBJECT_COLOUR: Record<string, string> = {
@@ -23,6 +36,18 @@ const OBJECT_COLOUR: Record<string, string> = {
 interface Props {
   cameraId: number;
   videoRef: RefObject<HTMLVideoElement>;
+}
+
+/** How long a frame stays on screen without a newer one, for the observed cadence. */
+function staleWindow(avgMs: number | null): number {
+  if (avgMs === null) return MIN_STALE_MS;
+  return Math.min(MAX_STALE_MS, Math.max(MIN_STALE_MS, STALE_INTERVALS * avgMs));
+}
+
+function frameAlpha(ageMs: number, staleMs: number): number {
+  const fadeFrom = staleMs * FADE_FROM;
+  if (ageMs <= fadeFrom) return 1;
+  return Math.max(0, 1 - (ageMs - fadeFrom) / (staleMs - fadeFrom));
 }
 
 export function DetectionOverlay({ cameraId, videoRef }: Props) {
@@ -47,7 +72,8 @@ export function DetectionOverlay({ cameraId, videoRef }: Props) {
       ctx.clearRect(0, 0, cw, ch);
       if (!latest) return;
       const age = performance.now() - latest.at;
-      if (age > STALE_MS) {
+      const stale = staleWindow(overlayCadenceMs(cameraId));
+      if (age >= stale) {
         latest = null;
         return;
       }
@@ -60,7 +86,7 @@ export function DetectionOverlay({ cameraId, videoRef }: Props) {
       const dh = vh * scale;
       const ox = (cw - dw) / 2;
       const oy = (ch - dh) / 2;
-      ctx.globalAlpha = age < STALE_MS / 2 ? 1 : 1 - (age - STALE_MS / 2) / (STALE_MS / 2);
+      ctx.globalAlpha = frameAlpha(age, stale);
       ctx.font = '600 12px Inter, system-ui, sans-serif';
       ctx.textBaseline = 'top';
       const box = (b: WsOverlayBox, colour: string, text: string) => {
@@ -82,8 +108,8 @@ export function DetectionOverlay({ cameraId, videoRef }: Props) {
       ctx.globalAlpha = 1;
     };
 
-    const unsubscribe = subscribeOverlay(cameraId, (frame) => {
-      latest = { frame, at: performance.now() };
+    const unsubscribe = subscribeOverlay(cameraId, (frame, arrivedAt) => {
+      latest = { frame, at: arrivedAt };
       draw();
     });
     const timer = window.setInterval(draw, REDRAW_MS); // fade-out and resize without a new frame

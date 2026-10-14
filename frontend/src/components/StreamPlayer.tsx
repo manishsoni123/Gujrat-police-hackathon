@@ -38,7 +38,7 @@ export interface StreamPlayerProps {
   snapshotUrl?: string | null;
   compact?: boolean;
   onInfo?: (info: StreamInfo) => void;
-  /** Draw live detection boxes (`/ws/reads` `overlay` frames) over the video. */
+  /** Draw live detection boxes (`/ws/reads` `overlay` frames) over the video while it plays via WebRTC. */
   detections?: boolean;
   /** When set, the control bar gets a detections toggle. */
   onDetectionsChange?: (on: boolean) => void;
@@ -426,6 +426,19 @@ export function StreamPlayer(props: StreamPlayerProps) {
 
   const snapshotSrc = withCacheBuster(snapshotUrl ?? info?.snapshot_url ?? null, snapTick);
   const showVideo = phase === 'playing' || phase === 'connecting' || phase === 'fallback';
+  // Detection boxes are drawn the moment the worker posts them (a few hundred ms after capture), so they
+  // only line up with a near-real-time picture: a playing WebRTC session. HLS plays 3 segments behind the
+  // live edge (3-6 s with the relay's GOP-cut segments), where the boxes would land on empty road before
+  // the vehicle arrives; while connecting or falling back the picture is black or frozen.
+  const detectionsLive = phase === 'playing' && active === 'whep';
+  const detectionsTip = props.detections ? 'Hide detection boxes' : 'Show detection boxes';
+  const detectionsNote = detectionsLive
+    ? null
+    : active === 'hls' && phase === 'playing'
+      ? 'Not drawn over HLS: it plays several seconds behind the detector, so the boxes would not match the vehicles. They show over WebRTC playback.'
+      : phase === 'snapshot'
+        ? 'Drawn only over live WebRTC video, not over snapshots.'
+        : 'Drawn only over live WebRTC video: they appear once the WebRTC stream is playing.';
 
   const fullscreen = () => {
     const el = containerRef.current;
@@ -448,7 +461,7 @@ export function StreamPlayer(props: StreamPlayerProps) {
   return (
     <div className="sg-player" ref={containerRef} tabIndex={0} aria-label={`Live stream ${title ?? info?.name ?? cameraId}`}>
       <video ref={videoRef} muted={muted} playsInline autoPlay controls={false} style={{ display: showVideo ? undefined : 'none' }} />
-      {props.detections && showVideo ? <DetectionOverlay cameraId={cameraId} videoRef={videoRef} /> : null}
+      {props.detections && detectionsLive ? <DetectionOverlay cameraId={cameraId} videoRef={videoRef} /> : null}
       {!showVideo ? (
         snapshotSrc ? (
           <img src={snapshotSrc} alt={`Latest snapshot of ${title ?? info?.name ?? `camera ${cameraId}`}`} />
@@ -488,7 +501,18 @@ export function StreamPlayer(props: StreamPlayerProps) {
         {!snapshotOnly ? (
           <div className="sg-player-controls sg-no-print">
             {props.onDetectionsChange ? (
-              <Tooltip title={props.detections ? 'Hide detection boxes' : 'Show detection boxes'}>
+              <Tooltip
+                title={
+                  detectionsNote ? (
+                    <>
+                      <div>{detectionsTip}</div>
+                      <div style={{ fontSize: 12, opacity: 0.85 }}>{detectionsNote}</div>
+                    </>
+                  ) : (
+                    detectionsTip
+                  )
+                }
+              >
                 <Button
                   size="small"
                   type={props.detections ? 'primary' : 'default'}
