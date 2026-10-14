@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self
 
-from pydantic import Field, field_validator
+from pydantic import Field, PrivateAttr, ValidationError, field_validator, model_validator
+from pydantic.functional_validators import ModelWrapValidatorHandler
 
 from app.db.models import OBJECT_CLASSES
 from app.schemas.common import ApiModel
+
+PLATE_NORM_MAX = 16  # varchar(16): plate_reads.plate_norm and sightings.plate_norm
+MAX_REASON_CHARS = 300
 
 
 class ReadIn(ApiModel):
@@ -15,7 +19,7 @@ class ReadIn(ApiModel):
     stream_pts: float | None = None
     frame_index: int | None = None
     plate_raw: str = Field(max_length=64)
-    plate_norm: str | None = Field(None, max_length=16)
+    plate_norm: str | None = Field(None, max_length=PLATE_NORM_MAX)
     is_valid_format: bool | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     bbox: list[int] | None = None
@@ -34,7 +38,7 @@ class ReadIn(ApiModel):
 
 class SightingIn(ApiModel):
     key: str = Field(max_length=80)
-    plate_norm: str = Field(max_length=16)
+    plate_norm: str = Field(max_length=PLATE_NORM_MAX)
     is_valid_format: bool | None = None
     first_seen: str
     last_seen: str
@@ -83,7 +87,36 @@ class EventIn(ApiModel):
         return v
 
 
+def _item_reason(exc: ValidationError) -> str:
+    """`field: message[; field: message]` for one list item; the input value is never echoed."""
+    parts = []
+    for e in exc.errors():
+        loc = ".".join(str(p) for p in e.get("loc", ()))
+        msg = str(e.get("msg", "invalid")).removeprefix("Value error, ")
+        parts.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(parts)[:MAX_REASON_CHARS]
+
+
+# payload list → (item model, `rejected[].kind`)
+_ITEM_LISTS: dict[str, tuple[type[ApiModel], str]] = {
+    "reads": (ReadIn, "read"),
+    "sightings": (SightingIn, "sighting"),
+    "object_counts": (ObjectCountIn, "object_count"),
+    "events": (EventIn, "event"),
+}
+
+
 class DetectionBatch(ApiModel):
+    """CONTRACT §7.2 payload.
+
+    The envelope is validated strictly (a `ValidationError` is a 422 for the whole batch), but
+    every item of `reads`, `sightings`, `object_counts` and `events` is validated on its own: an
+    invalid item (e.g. a 35-character OCR string as `plate_norm`) is left out of its list and
+    recorded in `rejected_items` as `{index, kind, reason}`, so the rest of the batch is ingested.
+    `positions(field)` gives the payload index of every kept item, for the `rejected[].index` of
+    later, per-item rejections.
+    """
+
     worker_id: str = Field("unknown", max_length=64)
     mode: str = "live"
     camera_id: int
@@ -95,12 +128,53 @@ class DetectionBatch(ApiModel):
     live_counts: LiveCountsIn | None = None
     events: list[EventIn] = Field(default_factory=list)
 
+    _positions: dict[str, list[int]] = PrivateAttr(default_factory=dict)
+    _rejected: list[dict[str, Any]] = PrivateAttr(default_factory=list)
+
     @field_validator("mode")
     @classmethod
     def _mode(cls, v: str) -> str:
         if v not in ("live", "preindex"):
             raise ValueError("must be live or preindex")
         return v
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _per_item(cls, data: Any, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        if not isinstance(data, dict):
+            return handler(data)
+        kept_lists: dict[str, list[Any]] = {}
+        positions: dict[str, list[int]] = {}
+        rejected: list[dict[str, Any]] = []
+        for field, (model, kind) in _ITEM_LISTS.items():
+            raw = data.get(field)
+            if not isinstance(raw, list):
+                continue  # absent → default; not a list → the envelope's 422
+            kept: list[Any] = []
+            kept_at: list[int] = []
+            for idx, item in enumerate(raw):
+                try:
+                    kept.append(model.model_validate(item))
+                except ValidationError as exc:
+                    rejected.append({"index": idx, "kind": kind, "reason": _item_reason(exc)})
+                    continue
+                kept_at.append(idx)
+            kept_lists[field] = kept
+            positions[field] = kept_at
+        batch = handler({**data, **kept_lists})
+        batch._positions = positions
+        batch._rejected = rejected
+        return batch
+
+    def positions(self, field: str) -> list[int]:
+        """Payload index of each item kept in `field` (reads, sightings, object_counts, events)."""
+        kept_at = self._positions.get(field)
+        return list(kept_at) if kept_at is not None else list(range(len(getattr(self, field))))
+
+    @property
+    def rejected_items(self) -> list[dict[str, Any]]:
+        """Items left out because they failed their own schema: `{index, kind, reason}` (§7.2)."""
+        return [dict(r) for r in self._rejected]
 
 
 class EventsBatch(ApiModel):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -16,7 +17,7 @@ from app.core.errors import ApiError, not_found
 from app.core.hashing import media_url, write_bytes_hashed
 from app.core.tz import epoch_ms, iso_z, parse_iso, utc_date_dir, utcnow
 from app.db.models import Alert, Camera, Event, ObjectCount, PlateRead, Sighting, Zone
-from app.schemas.internal import DetectionBatch, EventIn, ObjectCountIn
+from app.schemas.internal import PLATE_NORM_MAX, DetectionBatch, EventIn, ObjectCountIn
 from app.services import serializers
 from app.services.matcher import matcher
 from app.services.plates import normalise
@@ -46,6 +47,10 @@ def _validate_jpeg(data: bytes | None, max_bytes: int) -> str | None:
     return None
 
 
+def _too_long(plate_norm: str) -> str:
+    return f"plate_norm has {len(plate_norm)} characters after normalisation (max {PLATE_NORM_MAX})"
+
+
 async def get_camera_for_ingest(db: AsyncSession, camera_id: int) -> Camera:
     cam = await db.get(Camera, camera_id)
     if cam is None or cam.status == "retired":
@@ -57,7 +62,9 @@ async def ingest_batch(db: AsyncSession, batch: DetectionBatch, files: dict[str,
     cam = await get_camera_for_ingest(db, batch.camera_id)
     await serializers.warm(db)
     await matcher.maybe_reload(db)
-    rejected: list[dict[str, Any]] = []
+    # items that failed their own schema (§7.2): reported, the rest of the batch is still ingested;
+    # every `index` below is the item's position in the worker's payload list
+    rejected: list[dict[str, Any]] = batch.rejected_items
     counters = {"accepted_reads": 0, "accepted_sightings": 0, "alerts_created": 0, "alerts_updated": 0, "object_counts_upserted": 0, "events_created": 0}
     now = utcnow()
     date_dir = utc_date_dir(now)
@@ -70,7 +77,7 @@ async def ingest_batch(db: AsyncSession, batch: DetectionBatch, files: dict[str,
         rows = (await db.execute(select(Sighting).where(Sighting.worker_key.in_(list(set(keys)))))).scalars().all()
         sightings_by_key = {s.worker_key: s for s in rows}
 
-    for idx, sin in enumerate(batch.sightings):
+    for idx, sin in zip(batch.positions("sightings"), batch.sightings, strict=True):
         try:
             first_seen, last_seen = parse_iso(sin.first_seen), parse_iso(sin.last_seen)
         except ValueError:
@@ -81,13 +88,16 @@ async def ingest_batch(db: AsyncSession, batch: DetectionBatch, files: dict[str,
             continue
         norm = normalise(sin.plate_norm)
         plate_norm = norm.plate_norm or sin.plate_norm.upper()
+        if len(plate_norm) > PLATE_NORM_MAX:  # never cut into a different plate
+            rejected.append({"index": idx, "kind": "sighting", "reason": _too_long(plate_norm)})
+            continue
         is_valid = norm.is_valid_format
         s = sightings_by_key.get(sin.key)
         if s is None:
             s = Sighting(
                 worker_key=sin.key[:80],
                 camera_id=cam.id,
-                plate_norm=plate_norm[:16],
+                plate_norm=plate_norm,
                 is_valid_format=is_valid,
                 first_seen=first_seen,
                 last_seen=last_seen,
@@ -129,7 +139,7 @@ async def ingest_batch(db: AsyncSession, batch: DetectionBatch, files: dict[str,
     #    reported as `rejected` with reason `duplicate` and neither its crop nor an alert update
     #    is produced. The unique index `uq_reads_camera_captured_plate` makes this race-safe.
     new_reads: list[tuple[PlateRead, Sighting | None, str | None]] = []
-    for idx, rin in enumerate(batch.reads):
+    for idx, rin in zip(batch.positions("reads"), batch.reads, strict=True):
         captured = None
         try:
             captured = parse_iso(rin.captured_at)
@@ -146,7 +156,10 @@ async def ingest_batch(db: AsyncSession, batch: DetectionBatch, files: dict[str,
         norm = normalise(rin.plate_raw)
         if rin.plate_norm and (rin.plate_norm != norm.plate_norm or (rin.is_valid_format is not None and rin.is_valid_format != norm.is_valid_format)):
             log.warning("worker normalisation differs for %r: worker=%s api=%s", rin.plate_raw, rin.plate_norm, norm.plate_norm)
-        plate_norm = (norm.plate_norm or rin.plate_raw.upper())[:16]
+        plate_norm = norm.plate_norm or rin.plate_raw.upper()
+        if len(plate_norm) > PLATE_NORM_MAX:  # e.g. a caption read into the plate: never cut it
+            rejected.append({"index": idx, "kind": "read", "reason": _too_long(plate_norm)})
+            continue
         sighting = sightings_by_key.get(rin.sighting_key)
         rel = f"crops/{cam.id}/{date_dir}/{uuid.uuid4().hex}.jpg"
         values = {
@@ -203,10 +216,14 @@ async def ingest_batch(db: AsyncSession, batch: DetectionBatch, files: dict[str,
             counters["alerts_created" if created else "alerts_updated"] += 1
 
     # 4. object counts
-    counters["object_counts_upserted"] += await upsert_object_counts(db, cam.id, batch.object_counts, rejected)
+    counters["object_counts_upserted"] += await upsert_object_counts(
+        db, cam.id, batch.object_counts, rejected, batch.positions("object_counts")
+    )
 
     # 5. events
-    counters["events_created"] += await create_worker_events(db, cam, batch.events, files, rejected)
+    counters["events_created"] += await create_worker_events(
+        db, cam, batch.events, files, rejected, batch.positions("events")
+    )
 
     await db.commit()
 
@@ -242,9 +259,16 @@ async def _insert_read_once(db: AsyncSession, values: dict[str, Any]) -> int | N
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def upsert_object_counts(db: AsyncSession, camera_id: int, counts: list[ObjectCountIn], rejected: list[dict[str, Any]]) -> int:
+async def upsert_object_counts(
+    db: AsyncSession,
+    camera_id: int,
+    counts: list[ObjectCountIn],
+    rejected: list[dict[str, Any]],
+    positions: Sequence[int] | None = None,
+) -> int:
+    """Upsert final per-minute counts; `positions` = payload index of each count (default: own)."""
     n = 0
-    for idx, oc in enumerate(counts):
+    for idx, oc in zip(range(len(counts)) if positions is None else positions, counts, strict=True):
         try:
             minute = parse_iso(oc.minute)
         except ValueError:
@@ -260,8 +284,17 @@ async def upsert_object_counts(db: AsyncSession, camera_id: int, counts: list[Ob
     return n
 
 
-async def create_worker_events(db: AsyncSession, cam: Camera, events: list[EventIn], files: dict[str, bytes], rejected: list[dict[str, Any]]) -> int:
+async def create_worker_events(
+    db: AsyncSession,
+    cam: Camera,
+    events: list[EventIn],
+    files: dict[str, bytes],
+    rejected: list[dict[str, Any]],
+    positions: Sequence[int] | None = None,
+) -> int:
     """Insert worker events (`loop_reset`, `intrusion`) idempotently.
+
+    `positions` is the payload index of each event for `rejected[].index` (default: its own index).
 
     The worker re-sends a whole batch after a timeout/5xx (CONTRACT §7.7), so an event that is
     already stored — same camera, type, `occurred_at` and note, enforced by the partial unique
@@ -270,7 +303,7 @@ async def create_worker_events(db: AsyncSession, cam: Camera, events: list[Event
     """
     n = 0
     now = utcnow()
-    for idx, ev in enumerate(events):
+    for idx, ev in zip(range(len(events)) if positions is None else positions, events, strict=True):
         try:
             occurred = parse_iso(ev.occurred_at)
         except ValueError:

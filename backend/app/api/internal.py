@@ -110,9 +110,14 @@ async def detections(request: Request, db: DbDep):
     _check_size(request)
     payload, files = await _multipart(request)
     try:
+        # 422 only for the envelope; an invalid read/sighting/count/event is one `rejected` entry
         batch = DetectionBatch.model_validate(payload)
     except ValidationError as exc:
         raise validation_error("Invalid detection batch", _issues(exc))
+    if batch.rejected_items:  # the worker does not read the response: say it here
+        bad = "; ".join(f"{r['kind']}[{r['index']}] {r['reason']}" for r in batch.rejected_items)
+        log.warning("detections camera %s: %d item(s) failed the schema and were skipped: %s",
+                    batch.camera_id, len(batch.rejected_items), bad[:1000])
     return await ingest_batch(db, batch, files)
 
 
