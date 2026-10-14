@@ -461,32 +461,32 @@ export function detectionDetail(d: Detection): DetectionDetail {
 }
 
 /* ------------------------------------------------------------------ watchlist (CONTRACT §12.2) */
+// Mirrors backend/seeds/watchlist_seed.csv (seed rev 4/5): every row is labelled as demo data, and the
+// plates read on the government cameras carry no case (reason other, source manual, disclaimer).
+// Only difference: GJ18CD5678 stays active here so the mock shows a second critical anchor.
 
 type WlRow = [string, 'vehicle' | 'person', string, WatchlistReason, AlertPriority, WatchlistEntry['source'], string, string | null, boolean];
 const WL: WlRow[] = [
-  ['GJ01AB1234', 'vehicle', 'White Maruti Swift – FIR 123/2026 Sector 7 PS', 'stolen', 'critical', 'own', 'Reported stolen 2026-08-30 from Sector 7 Gandhinagar', null, true],
-  ['GJ18CD5678', 'vehicle', 'Grey Hyundai Creta – wanted in Kalupur case', 'wanted', 'critical', 'egujcop', 'eGujCop reference EGC-2026-004411', null, true],
-  ['GJ05RS9012', 'vehicle', 'Blacklisted goods carrier (overloading)', 'blacklisted', 'high', 'manual', 'RTO blacklist – repeat offender', null, true],
-  ['MH02BZ7788', 'vehicle', "Silver Honda City – missing person's vehicle", 'missing', 'medium', 'own', 'Missing person report MPR-2026-0912', null, true],
-  ['GJ06KL4455', 'vehicle', 'Suspect vehicle – chain snatching pattern', 'suspect', 'low', 'manual', 'Seen near Infocity thrice', '2026-12-31T18:30:00Z', true],
-  ['GJ27XY3456', 'vehicle', 'Demo plate (added live during the jury demo)', 'suspect', 'low', 'manual', 'Not active by default – the demo adds it', null, false],
-  ['GJ01CJ7788', 'vehicle', 'Black Toyota Fortuner – stolen', 'stolen', 'critical', 'own', '', null, true],
-  ['GJ03BM2210', 'vehicle', 'Red Bajaj Pulsar – stolen two-wheeler', 'stolen', 'high', 'own', '', null, true],
-  ['GJ05JE9834', 'vehicle', 'Wanted – Surat cheating case', 'wanted', 'critical', 'egujcop', '', null, true],
-  ['GJ12AK1001', 'vehicle', 'Blacklisted taxi – permit cancelled', 'blacklisted', 'medium', 'vahan', '', null, true],
-  ['GJ33AT5566', 'vehicle', 'Suspect – border movement Dahod', 'suspect', 'low', 'manual', '', null, true],
-  ['GJ38CH0007', 'vehicle', 'Suspect – Valsad narcotics watch', 'suspect', 'medium', 'manual', '', null, true],
-  ['DL3CAB9911', 'vehicle', 'Wanted – interstate', 'wanted', 'high', 'egujcop', '', null, true],
-  ['RJ14CV3030', 'vehicle', 'Stolen in Rajasthan – NCRB advisory', 'stolen', 'high', 'egujcop', '', null, true],
-  ['MP09HB6161', 'vehicle', 'Blacklisted – toll evasion', 'blacklisted', 'low', 'manual', '', null, true],
-  ['GJ10AD7070', 'vehicle', 'Missing – elderly driver', 'missing', 'medium', 'own', '', null, true],
-  ['GJ15CQ2424', 'vehicle', 'Suspect – Rajkot burglary pattern', 'suspect', 'low', 'manual', '', '2026-10-31T18:30:00Z', true],
-  ['GJ21AR8181', 'vehicle', "Arrested person's vehicle (impound pending)", 'arrested', 'high', 'egujcop', '', null, true],
-  ['KA01MJ4545', 'vehicle', 'Wanted – Bengaluru case (interstate lookout)', 'wanted', 'high', 'egujcop', '', null, true],
-  ['GJ09BW0110', 'vehicle', 'Expired entry (kept for history)', 'blacklisted', 'low', 'manual', '', '2026-08-01T00:00:00Z', true],
-  ['', 'person', 'Ramesh K. (wanted – Ahmedabad PS)', 'wanted', 'critical', 'egujcop', 'FRS roadmap – no plate', null, true],
-  ['', 'person', 'Unidentified body case UDB-2026-17', 'unidentified_body', 'medium', 'manual', 'AFIS/NAFIS readiness placeholder', null, true],
-  ['', 'person', 'Missing minor – Surat', 'missing', 'high', 'own', '', null, true],
+  ['GJ01AB1234', 'vehicle', 'DEMO – White Maruti Swift – FIR 123/2026 Sector 7 PS', 'stolen', 'critical', 'own', 'Reported stolen 2026-08-30 from Sector 7 Gandhinagar (synthetic anchor: own-gate loop)', null, true],
+  ['GJ18CD5678', 'vehicle', 'DEMO – Grey Hyundai Creta – wanted in Kalupur case', 'wanted', 'critical', 'egujcop', 'eGujCop reference EGC-2026-004411 – synthetic anchor (mock loops)', null, true],
+  ['GJ05RS9012', 'vehicle', 'DEMO – Blacklisted goods carrier (overloading)', 'blacklisted', 'high', 'manual', 'RTO blacklist – repeat offender (synthetic anchor: mock loops)', null, true],
+  ['MH02BZ7788', 'vehicle', "DEMO – Silver Honda City – missing person's vehicle", 'missing', 'medium', 'own', 'Missing person report MPR-2026-0912 (synthetic anchor: mock loops)', null, true],
+  ['GJ06KL4455', 'vehicle', 'DEMO – Suspect vehicle – chain snatching pattern', 'suspect', 'low', 'manual', 'Seen near Infocity thrice (synthetic anchor)', '2026-12-31T18:30:00Z', true],
+  ['GJ27XY3456', 'vehicle', 'DEMO – Demo plate (added live during the jury demo)', 'suspect', 'low', 'manual', 'Not active by default – the demo adds it', null, false],
+  ['GJ32AG2319', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'critical', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read twice on cam07 Bhavani junction (Gir Somnath) 05 Sep 2026 21:43 IST conf 0.91 / 0.90; plate confirmed by eye on the crop', null, true],
+  ['GJ14AA3978', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'high', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read on cam07 05 Sep 2026 21:06 IST conf 0.83; plate confirmed by eye on the crop', null, true],
+  ['GJ32K0225', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'medium', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read on cam07 05 Sep 2026 21:39 IST conf 0.70; plate confirmed by eye on the crop', null, true],
+  ['GJ10OG9093', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'medium', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read on cam07 05 Sep 2026 21:43 IST conf 0.90; series letters O/D ambiguous by eye', null, true],
+  ['GJ3B7160', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'low', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read on cam07 05 Sep 2026 20:31 IST conf 0.84 as GJ3B7160; by eye the plate reads GJ 38 ? 7160 (series letter unclear) – kept as read so a re-read matches exactly and the by-eye form matches fuzzily', null, true],
+  ['GJ10F0032', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'critical', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read on cam07 05 Sep 2026 22:09 IST conf 0.88; plate confirmed by eye on the crop', null, true],
+  ['GJ32AA4959', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'medium', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read on cam07 05 Sep 2026 22:12 IST conf 0.88; plate confirmed by eye on the crop', null, true],
+  ['GJ32AG5511', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07', 'other', 'low', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: read on cam07 05 Sep 2026 20:16 IST as FGJ32AG5511 conf 0.64 (invalid format because of the leading F); by eye the crop reads GJ 32 AG 5511', null, true],
+  ['GJ32X9785', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07 (survey)', 'other', 'high', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: the one valid read of the 30-camera readability survey (scripts/survey_anpr.py) – cam07 84 px conf 0.81 (docs/anpr-camera-selection.md)', null, true],
+  ['GJ36AJ2890', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07 (crop bank)', 'other', 'medium', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: crop bank media/anpr_crops labels.csv – cam07 94 px every glyph legible by hand (docs/anpr-accuracy.md §3)', null, true],
+  ['GJ32D3783', 'vehicle', 'DEMO TEST ENTRY – no real case – plate read on cam07 (crop bank)', 'other', 'high', 'manual', 'DEMO/TEST watchlist entry - this registration is NOT linked to any real case or person. Government feed: crop bank labels.csv – cam07 92 px; 5th glyph D/0 ambiguous (D by the Indian format)', null, true],
+  ['', 'person', 'DEMO – fictional wanted person (FRS roadmap placeholder)', 'wanted', 'critical', 'manual', 'FRS roadmap – no plate', null, true],
+  ['', 'person', 'DEMO – fictional unidentified-body case (AFIS/NAFIS placeholder)', 'unidentified_body', 'medium', 'manual', 'AFIS/NAFIS readiness placeholder', null, true],
+  ['', 'person', 'DEMO – fictional missing minor', 'missing', 'high', 'own', '', null, true],
 ];
 export const watchlist: WatchlistEntry[] = WL.map((r, i) => {
   const [plate, entity, name, reason, priority, source, notes, expires, active] = r;
